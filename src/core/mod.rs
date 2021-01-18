@@ -3,11 +3,7 @@
 pub mod error;
 pub mod vm;
 
-use lazy_static::lazy_static;
-
 use crate::core::error::Error;
-
-use howlong::clock::SteadyClock;
 
 use parity_wasm::builder;
 use parity_wasm::elements::{self, External, ImportEntry, MemoryType, Module};
