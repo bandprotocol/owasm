@@ -1,7 +1,14 @@
+#![feature(path)]
+
 pub mod error;
 pub mod vm;
 
-pub use error::Error;
+use lazy_static::lazy_static;
+
+use crate::core::error::Error;
+
+use howlong::clock::SteadyClock;
+
 use parity_wasm::builder;
 use parity_wasm::elements::{self, External, ImportEntry, MemoryType, Module};
 
@@ -10,6 +17,38 @@ use std::ffi::c_void;
 use wasmer_runtime::Ctx;
 use wasmer_runtime_core::error::RuntimeError;
 use wasmer_runtime_core::{func, imports, wasmparser, Func};
+
+use std::fs::OpenOptions;
+use std::io::prelude::*;
+
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+struct Record {
+    gas: u32,
+    duration: Duration,
+    name: String,
+}
+
+static mut records: Vec<Record> = vec![];
+static mut start: Option<Instant> = None; // = Instant::new();
+
+fn record(g: u32, n: &str) {
+    unsafe {
+        let t = match start {
+            Some(t) => t,
+            None => {
+                start = Some(Instant::now());
+                return;
+            }
+        };
+
+        let dur = Instant::now() - t;
+
+        records.push(Record { gas: g, duration: dur, name: n.to_string() });
+
+        start = Some(Instant::now());
+    }
+}
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -132,18 +171,27 @@ pub fn run<E>(code: &[u8], gas: u32, is_prepare: bool, env: &E) -> Result<u32, E
 where
     E: vm::Env,
 {
+    unsafe {
+        records = Vec::with_capacity(1000000);
+    }
+
+    record(0u32, "mock to reset clock");
     let vm = &mut vm::VMLogic::new(env, gas);
+    record(0u32, "setup 1: new vm");
     let raw_ptr = vm as *mut _ as *mut c_void;
     let import_reference = ImportReference(raw_ptr);
+    record(0u32, "setup 2: import reference");
     let import_object = imports! {
         move || (import_reference.0, (|_: *mut c_void| {}) as fn(*mut c_void)),
         "env" => {
             "gas" => func!(|ctx: &mut Ctx, gas: u32| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
+                record(gas, "env.gas");
                 vm.consume_gas(gas)
             }),
             "get_span_size" =>  func!(|ctx: &mut Ctx| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
+                record(0u32, "env.get_span_size");
                 vm.env.get_span_size()
             }),
             "read_calldata" => func!(|ctx: &mut Ctx, ptr: i64| -> Result<i64, Error> {
@@ -155,44 +203,53 @@ where
                 for (idx, byte) in data.iter().enumerate() {
                     ctx.memory(0).view()[ptr as usize + idx].set(*byte)
                 }
+                record(span_size as u32, "env.read_calldata");
                 Ok(data.len() as i64)
             }),
             "set_return_data" => func!(|ctx: &mut Ctx, ptr: i64, len: i64| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
                 let span_size = vm.env.get_span_size();
                 if len > span_size {
+                    record(span_size as u32, "env.set_return_data");
                     return Err(Error::SpanTooSmallError);
                 }
                 vm.consume_gas(span_size as u32)?;
                 require_mem_range(ctx.memory(0).size().bytes().0, (ptr + len) as usize)?;
                 let data: Vec<u8> = ctx.memory(0).view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
+                record(span_size as u32, "env.set_return_data");
                 vm.env.set_return_data(&data)
             }),
             "get_ask_count" => func!(|ctx: &mut Ctx| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
+                record(0u32, "env.get_ask_count");
                 vm.env.get_ask_count()
             }),
             "get_min_count" => func!(|ctx: &mut Ctx| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
+                record(0u32, "env.get_min_count");
                 vm.env.get_min_count()
             }),
             "get_ans_count" => func!(|ctx: &mut Ctx| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
+                record(0u32, "env.get_ans_count");
                 vm.env.get_ans_count()
             }),
             "ask_external_data" => func!(|ctx: &mut Ctx, eid: i64, did: i64, ptr: i64, len: i64| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
                 let span_size = vm.env.get_span_size();
                 if len > span_size {
+                    record(span_size as u32, "env.ask_external_data");
                     return Err(Error::SpanTooSmallError);
                 }
                 vm.consume_gas(span_size  as u32)?;
                 require_mem_range(ctx.memory(0).size().bytes().0, (ptr + len) as usize)?;
                 let data: Vec<u8> = ctx.memory(0).view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
+                record(span_size as u32, "env.ask_external_data");
                 vm.env.ask_external_data(eid, did, &data)
             }),
             "get_external_data_status" => func!(|ctx: &mut Ctx, eid: i64, vid: i64| {
                 let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
+                record(0u32, "env.ask_external_data");
                 vm.env.get_external_data_status(eid, vid)
             }),
             "read_external_data" => func!(|ctx: &mut Ctx, eid: i64, vid: i64, ptr: i64| -> Result<i64, Error> {
@@ -204,10 +261,12 @@ where
                 for (idx, byte) in data.iter().enumerate() {
                     ctx.memory(0).view()[ptr as usize + idx].set(*byte)
                 }
+                record(span_size as u32, "env.ask_external_data");
                 Ok(data.len() as i64)
             }),
         },
     };
+    record(0u32, "setup 3: import");
 
     let module = wasmer_runtime_core::compile_with_config(
         code,
@@ -218,10 +277,16 @@ where
         },
     )
     .map_err(|_| Error::InstantiationError)?;
+    record(0u32, "setup 4: compile with config");
+
     let instance = module.instantiate(&import_object).map_err(|_| Error::InstantiationError)?;
+    record(0u32, "setup 5: instantiate");
+
     let entry = if is_prepare { "prepare" } else { "execute" };
     let function: Func<(), ()> =
         instance.exports.get(entry).map_err(|_| Error::BadEntrySignatureError)?;
+
+    record(0u32, "setup 6: get function");
     function.call().map_err(|err| match err {
         RuntimeError::User(uerr) => {
             if let Some(err) = uerr.downcast_ref::<Error>() {
@@ -232,6 +297,29 @@ where
         }
         _ => Error::RuntimeError,
     })?;
+
+    record(0u32, "setup 7: get exec # inaccurate");
+
+    unsafe {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open("/tmp/owasm-stat.json")
+            .unwrap();
+
+        for i in &records {
+            write!(
+                file,
+                "{{\"name\" : {:?}, \"elapse\" : {:?}, \"gas\" : {:?}}}\n",
+                i.name,
+                i.duration.as_nanos(),
+                i.gas
+            )
+            .unwrap();
+        }
+    }
+
     Ok(vm.gas_used)
 }
 
