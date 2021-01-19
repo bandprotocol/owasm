@@ -1,4 +1,6 @@
 use crate::core::error::Error;
+use std::sync::{Arc, Mutex};
+use wasmer::WasmerEnv;
 
 pub trait Env {
     /// Returns the maximum span size value.
@@ -22,22 +24,23 @@ pub trait Env {
 }
 
 /// A `VMLogic` encapsulates the runtime logic of Owasm scripts.
-pub struct VMLogic<'a, E>
+// #[derive(Clone)]
+pub struct VMLogic<E>
 where
     E: Env,
 {
-    pub env: &'a E,     // The execution environment.
-    pub gas_limit: u32, // Amount of gas allowed for total execution.
-    pub gas_used: u32,  // Amount of gas used in this execution.
+    pub env: Arc<Mutex<E>>, // The execution environment.
+    pub gas_limit: u32,     // Amount of gas allowed for total execution.
+    pub gas_used: u32,      // Amount of gas used in this execution.
 }
 
-impl<'a, E> VMLogic<'a, E>
+impl<E> VMLogic<E>
 where
     E: Env,
 {
     /// Creates a new `VMLogic` instance.
-    pub fn new(env: &'a E, gas: u32) -> VMLogic<'a, E> {
-        VMLogic { env: env, gas_limit: gas, gas_used: 0 }
+    pub fn new(env: E, gas: u32) -> VMLogic<E> {
+        VMLogic { env: Arc::new(Mutex::new(env)), gas_limit: gas, gas_used: 0 }
     }
 
     /// Consumes the given amount of gas. Return `OutOfGasError` error if run out of gas.
@@ -50,3 +53,13 @@ where
         }
     }
 }
+
+impl<E: Env> Clone for VMLogic<E> {
+    fn clone(&self) -> Self {
+        Self { env: self.env.clone(), gas_limit: self.gas_limit, gas_used: self.gas_used }
+    }
+}
+
+unsafe impl<E: Env> Send for VMLogic<E> {}
+unsafe impl<E: Env> Sync for VMLogic<E> {}
+impl<E: Env> WasmerEnv for VMLogic<E> {}
