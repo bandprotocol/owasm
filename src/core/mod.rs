@@ -10,7 +10,7 @@ pub use std::ptr::NonNull;
 
 use pwasm_utils::{self, rules};
 
-// use wasmer_runtime_core::wasmparser;
+use wasmer_runtime_core::wasmparser;
 
 use wasmer::{imports, Function, Instance, Module as WasmerModule, Store};
 use wasmer_engine_jit::JIT;
@@ -111,8 +111,7 @@ fn check_wasm_imports(module: &Module) -> Result<(), Error> {
 
 pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
     // Check that the given Wasm code is indeed a valid Wasm.
-    // TODO: validate
-    // wasmparser::validate(code, None).map_err(|_| Error::ValidationError)?;
+    wasmparser::validate(code, None).map_err(|_| Error::ValidationError)?;
 
     // Start the compiling chains.
     let module = elements::deserialize_buffer(code).map_err(|_| Error::DeserializationError)?;
