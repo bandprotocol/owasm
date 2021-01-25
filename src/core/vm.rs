@@ -1,4 +1,8 @@
 use crate::core::error::Error;
+use std::ptr::NonNull;
+use std::sync::{Arc, Mutex, RwLock};
+
+use wasmer::{Instance, Memory, WasmerEnv};
 
 pub trait Env {
     /// Returns the maximum span size value.
@@ -22,21 +26,21 @@ pub trait Env {
 }
 
 /// A `VMLogic` encapsulates the runtime logic of Owasm scripts.
-pub struct VMLogic<'a, E>
+pub struct VMLogic<E>
 where
     E: Env,
 {
-    pub env: &'a E,     // The execution environment.
+    pub env: E,         // The execution environment.
     pub gas_limit: u32, // Amount of gas allowed for total execution.
     pub gas_used: u32,  // Amount of gas used in this execution.
 }
 
-impl<'a, E> VMLogic<'a, E>
+impl<E> VMLogic<E>
 where
     E: Env,
 {
     /// Creates a new `VMLogic` instance.
-    pub fn new(env: &'a E, gas: u32) -> VMLogic<'a, E> {
+    pub fn new(env: E, gas: u32) -> VMLogic<E> {
         VMLogic { env: env, gas_limit: gas, gas_used: 0 }
     }
 
@@ -47,6 +51,65 @@ where
             Err(Error::OutOfGasError)
         } else {
             Ok(())
+        }
+    }
+}
+
+pub struct ContextData {
+    /// A non-owning link to the wasmer instance
+    wasmer_instance: Option<NonNull<Instance>>,
+}
+
+impl ContextData {
+    pub fn new() -> Self {
+        ContextData { wasmer_instance: None }
+    }
+}
+
+#[derive(WasmerEnv)]
+pub struct Environment<E>
+where
+    E: Env + 'static,
+{
+    pub vm: Arc<Mutex<VMLogic<E>>>,
+    pub data: Arc<RwLock<ContextData>>,
+}
+
+impl<E: Env + 'static> Clone for Environment<E> {
+    fn clone(&self) -> Self {
+        Self { vm: Arc::clone(&self.vm), data: self.data.clone() }
+    }
+}
+unsafe impl<E: Env> Send for Environment<E> {}
+unsafe impl<E: Env> Sync for Environment<E> {}
+
+impl<E> Environment<E>
+where
+    E: Env + 'static,
+{
+    pub fn new(e: E, gas: u32) -> Self {
+        Self {
+            vm: Arc::new(Mutex::new(VMLogic::<E>::new(e, gas))),
+            data: Arc::new(RwLock::new(ContextData::new())),
+        }
+    }
+
+    /// Creates a back reference from a contact to its partent instance
+    pub fn set_wasmer_instance(&self, instance: Option<NonNull<Instance>>) {
+        let mut data = self.data.as_ref().write().unwrap();
+        data.wasmer_instance = instance;
+    }
+
+    pub fn memory(&self) -> Memory {
+        let data = self.data.as_ref().read().unwrap();
+        match data.wasmer_instance {
+            Some(instance_ptr) => {
+                let instance_ref = unsafe { instance_ptr.as_ref() };
+                let mut memories: Vec<Memory> =
+                    instance_ref.exports.iter().memories().map(|pair| pair.1.clone()).collect();
+                memories.pop().unwrap()
+            }
+            None => panic!("No instance provide ==============="),
         }
     }
 }
