@@ -71,8 +71,8 @@ pub struct Environment<E>
 where
     E: Env + 'static,
 {
-    pub vm: Arc<Mutex<VMLogic<E>>>,
-    pub data: Arc<RwLock<ContextData>>,
+    vm: Arc<Mutex<VMLogic<E>>>,
+    data: Arc<RwLock<ContextData>>,
 }
 
 impl<E: Env + 'static> Clone for Environment<E> {
@@ -94,6 +94,29 @@ where
         }
     }
 
+    // fn with_context_data_mut<C, R>(&self, callback: C) -> R
+    // where
+    //     C: FnOnce(&mut ContextData<S, Q>) -> R,
+    // {
+    //     let mut guard = self.data.as_ref().write().unwrap();
+    //     let context_data = guard.borrow_mut();
+    //     callback(context_data)
+    // }
+
+    pub fn with_vm<C, R>(&self, callback: C) -> R
+    where
+        C: FnOnce(&VMLogic<E>) -> R,
+    {
+        callback(&self.vm.lock().unwrap())
+    }
+
+    pub fn with_mut_vm<C, R>(&self, callback: C) -> R
+    where
+        C: FnOnce(&mut VMLogic<E>) -> R,
+    {
+        callback(&mut self.vm.lock().unwrap())
+    }
+
     /// Creates a back reference from a contact to its partent instance
     pub fn set_wasmer_instance(&self, instance: Option<NonNull<Instance>>) {
         let mut data = self.data.as_ref().write().unwrap();
@@ -109,7 +132,7 @@ where
                     instance_ref.exports.iter().memories().map(|pair| pair.1.clone()).collect();
                 memories.pop().unwrap()
             }
-            None => panic!("No instance provide ==============="),
+            None => panic!("No instance provide"),
         }
     }
 }
