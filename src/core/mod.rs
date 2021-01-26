@@ -1,6 +1,9 @@
+pub mod cache;
 pub mod error;
 pub mod vm;
 
+use cache::{Cache, CacheOptions};
+use cosmwasm_vm::Size;
 use vm::Environment;
 
 pub use error::Error;
@@ -12,7 +15,7 @@ use pwasm_utils::{self, rules};
 
 use wasmer_runtime_core::wasmparser;
 
-use wasmer::{imports, Function, Instance, Module as WasmerModule, Store};
+use wasmer::{imports, Function, Store};
 use wasmer_engine_jit::JIT;
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
@@ -32,6 +35,8 @@ static SUPPORTED_IMPORTS: &[&str] = &[
     "env.get_external_data_status",
     "env.read_external_data",
 ];
+
+static mut CACHE: Option<Cache> = None;
 
 fn inject_memory(module: Module) -> Result<Module, Error> {
     let mut m = module;
@@ -136,11 +141,15 @@ pub fn run<E>(code: &[u8], gas: u32, is_prepare: bool, env: E) -> Result<u32, Er
 where
     E: vm::Env + 'static,
 {
-    let owasm_env = Environment::new(env, gas);
+    unsafe {
+        if CACHE.is_none() {
+            CACHE = Some(Cache::new(CacheOptions { memory_cache_size: Size::mebi(16) }));
+        }
+    }
 
     let compiler = wasmer_compiler_singlepass::Singlepass::new();
     let store = Store::new(&JIT::new(compiler).engine());
-    let module = WasmerModule::new(&store, code).map_err(|_| Error::InstantiationError)?;
+    let owasm_env = Environment::new(env, gas);
 
     let import_object = imports! {
         "env" => {
@@ -246,7 +255,11 @@ where
         },
     };
 
-    let instance = Box::from(Instance::new(&module, &import_object).unwrap());
+    let instance = unsafe {
+        CACHE.as_mut().map(|c| c.get_instance(code, &store, &import_object).unwrap()).unwrap()
+    };
+    // let instance = cache.unwrap().get_instance(code, &store, &import_object).unwrap();
+    // let instance = Box::from(Instance::new(&module, &import_object).unwrap());
     let instance_ptr = NonNull::from(instance.as_ref());
 
     owasm_env.set_wasmer_instance(Some(instance_ptr));
