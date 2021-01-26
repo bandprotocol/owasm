@@ -143,7 +143,7 @@ where
 {
     unsafe {
         if CACHE.is_none() {
-            CACHE = Some(Cache::new(CacheOptions { memory_cache_size: Size::mebi(16) }));
+            CACHE = Some(Cache::new(CacheOptions { memory_cache_size: Size::mebi(2048) }));
         }
     }
 
