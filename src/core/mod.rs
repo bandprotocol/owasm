@@ -146,7 +146,7 @@ where
         "env" => {
             "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, gas: u32| {
                 env.with_mut_vm(|vm| {
-                    vm.consume_gas(gas).unwrap()
+                    vm.consume_gas(gas)
                 })
             }),
             "get_span_size" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
@@ -155,20 +155,20 @@ where
                 })
             }),
             "read_calldata" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, ptr: i64| {
-                env.with_mut_vm(|vm| {
+                env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
-                    vm.consume_gas(span_size as u32).unwrap();
+                    vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory();
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize).unwrap();
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
-                    let data = vm.env.get_calldata().unwrap();
+                    let data = vm.env.get_calldata()?;
 
                     for (idx, byte) in data.iter().enumerate() {
                         memory.view()[ptr as usize + idx].set(*byte);
                     }
 
-                    data.len() as i64
+                    Ok(data.len() as i64)
                 })
             }),
             "set_return_data" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, ptr: i64, len: i64| {
@@ -179,13 +179,13 @@ where
                         panic!(Error::SpanTooSmallError);
                     }
 
-                    vm.consume_gas(span_size as u32).unwrap();
+                    vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory();
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize).unwrap();
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
                     let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
-                    vm.env.set_return_data(&data).unwrap()
+                    vm.env.set_return_data(&data)
                 })
             }),
             "get_ask_count" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
@@ -200,7 +200,7 @@ where
             }),
             "get_ans_count" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
                 env.with_vm(|vm| {
-                    vm.env.get_ans_count().unwrap()
+                    vm.env.get_ans_count()
                 })
             }),
             "ask_external_data" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, eid: i64, did: i64, ptr: i64, len: i64| {
@@ -211,36 +211,35 @@ where
                         panic!(Error::SpanTooSmallError);
                     }
 
-                    vm.consume_gas(span_size  as u32).unwrap();
+                    vm.consume_gas(span_size  as u32)?;
 
                     let memory = env.memory();
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize).unwrap();
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
                     let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
-                    vm.env.ask_external_data(eid, did, &data).unwrap()
+                    vm.env.ask_external_data(eid, did, &data)
                 })
             }),
             "get_external_data_status" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, eid: i64, vid: i64| {
                 env.with_vm(|vm| {
-                    vm.env.get_external_data_status(eid, vid).unwrap()
+                    vm.env.get_external_data_status(eid, vid)
                 })
             }),
             "read_external_data" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, eid: i64, vid: i64, ptr: i64| {
-                env.with_mut_vm(|vm| {
+                env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
-
-                    vm.consume_gas(span_size  as u32).unwrap();
+                    vm.consume_gas(span_size  as u32)?;
 
                     let memory = env.memory();
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize).unwrap();
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
-                    let data = vm.env.get_external_data(eid, vid).unwrap();
+                    let data = vm.env.get_external_data(eid, vid)?;
 
                     for (idx, byte) in data.iter().enumerate() {
                         memory.view()[ptr as usize + idx].set(*byte);
                     }
 
-                    data.len() as i64
+                    Ok(data.len() as i64)
                 })
             }),
         },

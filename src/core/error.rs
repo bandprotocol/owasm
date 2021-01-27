@@ -1,5 +1,7 @@
+use std::fmt::{self, Display};
+
 #[repr(i32)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 // An enum representing all kinds of errors we have in the system, with 0 for no error.
 pub enum Error {
     NoError = 0,
@@ -29,4 +31,11 @@ pub enum Error {
     RepeatSetReturnDataError = 134, // Set return data is called more than once.
     // Unexpected error
     UnknownError = 255,
+}
+
+impl std::error::Error for Error {}
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
 }
