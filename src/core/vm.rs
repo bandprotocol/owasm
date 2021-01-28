@@ -94,15 +94,6 @@ where
         }
     }
 
-    // fn with_context_data_mut<C, R>(&self, callback: C) -> R
-    // where
-    //     C: FnOnce(&mut ContextData<S, Q>) -> R,
-    // {
-    //     let mut guard = self.data.as_ref().write().unwrap();
-    //     let context_data = guard.borrow_mut();
-    //     callback(context_data)
-    // }
-
     pub fn with_vm<C, R>(&self, callback: C) -> R
     where
         C: FnOnce(&VMLogic<E>) -> R,

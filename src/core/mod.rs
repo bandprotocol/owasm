@@ -1,6 +1,9 @@
+pub mod cache;
 pub mod error;
 pub mod vm;
 
+use cache::{Cache, CacheOptions};
+use cosmwasm_vm::Size;
 use vm::Environment;
 
 pub use error::Error;
@@ -12,8 +15,10 @@ use pwasm_utils::{self, rules};
 
 use wasmer_runtime_core::wasmparser;
 
-use wasmer::{imports, Function, Instance, Module as WasmerModule, Store};
+use wasmer::{imports, Function, Store};
 use wasmer_engine_jit::JIT;
+
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -32,6 +37,8 @@ static SUPPORTED_IMPORTS: &[&str] = &[
     "env.get_external_data_status",
     "env.read_external_data",
 ];
+
+static mut CACHE: Option<Cache> = None;
 
 fn inject_memory(module: Module) -> Result<Module, Error> {
     let mut m = module;
@@ -72,8 +79,7 @@ fn inject_stack_height(module: Module) -> Result<Module, Error> {
 fn inject_gas(module: Module) -> Result<Module, Error> {
     // Simple gas rule. Every opcode and memory growth costs 1 gas.
     let gas_rules = rules::Set::new(1, Default::default()).with_grow_cost(1);
-    pwasm_utils::inject_gas_counter(module, &gas_rules, "env")
-        .map_err(|_| Error::GasCounterInjectionError)
+    pwasm_utils::inject_gas_counter(module, &gas_rules).map_err(|_| Error::GasCounterInjectionError)
 }
 
 fn check_wasm_exports(module: &Module) -> Result<(), Error> {
@@ -136,11 +142,18 @@ pub fn run<E>(code: &[u8], gas: u32, is_prepare: bool, env: E) -> Result<u32, Er
 where
     E: vm::Env + 'static,
 {
+    let f = Instant::now();
+
+    unsafe {
+        if CACHE.is_none() {
+            CACHE = Some(Cache::new(CacheOptions { memory_cache_size: Size::mebi(16) }));
+        }
+    }
+
     let owasm_env = Environment::new(env, gas);
 
     let compiler = wasmer_compiler_singlepass::Singlepass::new();
     let store = Store::new(&JIT::new(compiler).engine());
-    let module = WasmerModule::new(&store, code).map_err(|_| Error::InstantiationError)?;
 
     let import_object = imports! {
         "env" => {
@@ -245,7 +258,16 @@ where
         },
     };
 
-    let instance = Box::from(Instance::new(&module, &import_object).unwrap());
+    let instance = unsafe {
+        CACHE.as_mut().map(|c| c.get_instance(code, &store, &import_object).unwrap()).unwrap()
+    };
+
+    let dur = Instant::now() - f;
+
+    let stats = unsafe { CACHE.as_ref().unwrap().stats() };
+    println!("[{}] hits: {}, misses: {}", dur.as_nanos(), stats.hits, stats.misses);
+
+    // let instance = Box::from(Instance::new(&module, &import_object).unwrap());
     let instance_ptr = NonNull::from(instance.as_ref());
 
     owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -259,9 +281,16 @@ where
         .native::<(), ()>()
         .map_err(|_| Error::BadEntrySignatureError)?;
 
-    function.call().map_err(|err| match err {
-        // RuntimeError::
-        _ => Error::RuntimeError,
+    // RuntimeError::User(uerr) => {
+    //     if let Some(err) = uerr.downcast_ref::<Error>() {
+    //         err.clone()
+    //     } else {
+    //         Error::UnknownError
+    //     }
+    // }
+    function.call().map_err(|err| {
+        println!("{}", err);
+        Error::UnknownError
     })?;
 
     Ok(owasm_env.with_vm(|vm| vm.gas_used))
