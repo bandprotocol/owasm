@@ -18,7 +18,7 @@ use wasmer_runtime_core::wasmparser;
 use wasmer::{imports, Function, Store};
 use wasmer_engine_jit::JIT;
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
