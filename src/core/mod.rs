@@ -172,7 +172,7 @@ where
                     let span_size = vm.env.get_span_size();
                     vm.consume_gas(span_size as u32)?;
 
-                    let memory = env.memory();
+                    let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
                     let data = vm.env.get_calldata()?;
@@ -194,7 +194,7 @@ where
 
                     vm.consume_gas(span_size as u32)?;
 
-                    let memory = env.memory();
+                    let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
                     let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
@@ -226,7 +226,7 @@ where
 
                     vm.consume_gas(span_size  as u32)?;
 
-                    let memory = env.memory();
+                    let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
                     let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
@@ -243,7 +243,7 @@ where
                     let span_size = vm.env.get_span_size();
                     vm.consume_gas(span_size  as u32)?;
 
-                    let memory = env.memory();
+                    let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
                     let data = vm.env.get_external_data(eid, vid)?;
@@ -267,9 +267,7 @@ where
     let stats = unsafe { CACHE.as_ref().unwrap().stats() };
     println!("[{}] hits: {}, misses: {}", dur.as_nanos(), stats.hits, stats.misses);
 
-    // let instance = Box::from(Instance::new(&module, &import_object).unwrap());
     let instance_ptr = NonNull::from(instance.as_ref());
-
     owasm_env.set_wasmer_instance(Some(instance_ptr));
 
     // get function and exec
@@ -281,16 +279,18 @@ where
         .native::<(), ()>()
         .map_err(|_| Error::BadEntrySignatureError)?;
 
-    // RuntimeError::User(uerr) => {
-    //     if let Some(err) = uerr.downcast_ref::<Error>() {
-    //         err.clone()
-    //     } else {
-    //         Error::UnknownError
-    //     }
-    // }
-    function.call().map_err(|err| {
-        println!("{}", err);
-        Error::UnknownError
+    function.call().map_err(|runtime_err| {
+        if let Ok(err) = runtime_err.downcast::<Error>() {
+            return err.clone();
+        }
+
+        owasm_env.with_vm(|vm| {
+            if vm.out_of_gas() {
+                return Error::OutOfGasError;
+            }
+
+            Error::RuntimeError
+        })
     })?;
 
     Ok(owasm_env.with_vm(|vm| vm.gas_used))

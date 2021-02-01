@@ -40,18 +40,22 @@ where
     E: Env,
 {
     /// Creates a new `VMLogic` instance.
-    pub fn new(env: E, gas: u32) -> VMLogic<E> {
-        VMLogic { env: env, gas_limit: gas, gas_used: 0 }
+    pub fn new(env: E, gas: u32) -> Self {
+        Self { env: env, gas_limit: gas, gas_used: 0 }
     }
 
     /// Consumes the given amount of gas. Return `OutOfGasError` error if run out of gas.
     pub fn consume_gas(&mut self, gas: u32) -> Result<(), Error> {
         self.gas_used = self.gas_used.saturating_add(gas);
-        if self.gas_used > self.gas_limit {
+        if self.out_of_gas() {
             Err(Error::OutOfGasError)
         } else {
             Ok(())
         }
+    }
+
+    pub fn out_of_gas(&self) -> bool {
+        self.gas_used >= self.gas_limit
     }
 }
 
@@ -114,16 +118,19 @@ where
         data.wasmer_instance = instance;
     }
 
-    pub fn memory(&self) -> Memory {
+    pub fn memory(&self) -> Result<Memory, Error> {
         let data = self.data.as_ref().read().unwrap();
         match data.wasmer_instance {
             Some(instance_ptr) => {
                 let instance_ref = unsafe { instance_ptr.as_ref() };
                 let mut memories: Vec<Memory> =
                     instance_ref.exports.iter().memories().map(|pair| pair.1.clone()).collect();
-                memories.pop().unwrap()
+                match memories.pop() {
+                    Some(m) => Ok(m),
+                    _ => Err(Error::MemoryOutOfBoundError),
+                }
             }
-            None => panic!("No instance provide"),
+            _ => Err(Error::BadMemorySectionError),
         }
     }
 }
