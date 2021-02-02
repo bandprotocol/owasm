@@ -189,7 +189,7 @@ where
                     let span_size = vm.env.get_span_size();
 
                     if len > span_size {
-                        panic!(Error::SpanTooSmallError);
+                        return Err(Error::SpanTooSmallError);
                     }
 
                     vm.consume_gas(span_size as u32)?;
@@ -221,7 +221,7 @@ where
                     let span_size = vm.env.get_span_size();
 
                     if len > span_size {
-                        panic!(Error::SpanTooSmallError);
+                        return Err(Error::SpanTooSmallError);
                     }
 
                     vm.consume_gas(span_size  as u32)?;
@@ -257,9 +257,9 @@ where
             }),
         },
     };
-
     let instance = unsafe {
-        CACHE.as_mut().map(|c| c.get_instance(code, &store, &import_object).unwrap()).unwrap()
+        let cache = CACHE.as_mut().unwrap();
+        cache.get_instance(code, &store, &import_object)?
     };
 
     let dur = Instant::now() - f;
@@ -267,7 +267,7 @@ where
     let stats = unsafe { CACHE.as_ref().unwrap().stats() };
     println!("[{}] hits: {}, misses: {}", dur.as_nanos(), stats.hits, stats.misses);
 
-    let instance_ptr = NonNull::from(instance.as_ref());
+    let instance_ptr = NonNull::from(&instance);
     owasm_env.set_wasmer_instance(Some(instance_ptr));
 
     // get function and exec

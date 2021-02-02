@@ -81,20 +81,20 @@ impl Cache {
         wasm: &[u8],
         store: &Store,
         import_object: &wasmer::ImportObject,
-    ) -> Result<Box<wasmer::Instance>, Error> {
+    ) -> Result<wasmer::Instance, Error> {
         let checksum = Checksum::generate(wasm);
 
         // lookup cache
         if let Some(module) = self.memory_cache.load(&checksum).unwrap() {
             self.stats.hits += 1;
-            return Ok(Box::from(Instance::new(&module, &import_object).unwrap()));
+            return Ok(Instance::new(&module, &import_object).unwrap());
         }
         self.stats.misses += 1;
 
         // recompile
         let module = Module::new(store, &wasm).map_err(|_| Error::InstantiationError)?;
-        self.memory_cache.store(&checksum, &module).unwrap();
+        self.memory_cache.store(&checksum, &module)?;
 
-        Ok(Box::from(Instance::new(&module, &import_object).unwrap()))
+        Ok(Instance::new(&module, &import_object).map_err(|_| Error::InstantiationError)?)
     }
 }

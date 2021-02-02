@@ -125,9 +125,10 @@ where
                 let instance_ref = unsafe { instance_ptr.as_ref() };
                 let mut memories: Vec<Memory> =
                     instance_ref.exports.iter().memories().map(|pair| pair.1.clone()).collect();
+
                 match memories.pop() {
                     Some(m) => Ok(m),
-                    _ => Err(Error::MemoryOutOfBoundError),
+                    None => Err(Error::MemoryOutOfBoundError),
                 }
             }
             _ => Err(Error::BadMemorySectionError),
