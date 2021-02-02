@@ -17,8 +17,6 @@ use wasmer_runtime_core::wasmparser;
 use wasmer::{imports, Function, Store};
 use wasmer_engine_jit::JIT;
 
-use std::time::Instant;
-
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
 static MEMORY_LIMIT: u32 = 512; // in pages
@@ -145,8 +143,6 @@ pub fn run<E>(
 where
     E: vm::Env + 'static,
 {
-    let start = Instant::now();
-
     let owasm_env = Environment::new(env, gas);
 
     let compiler = wasmer_compiler_singlepass::Singlepass::new();
@@ -281,14 +277,6 @@ where
             Error::RuntimeError
         })
     })?;
-
-    let dur = Instant::now() - start;
-    println!(
-        "[{}] hits: {}, misses: {}",
-        dur.as_millis(),
-        cache.stats().hits,
-        cache.stats().misses
-    );
 
     Ok(owasm_env.with_vm(|vm| vm.gas_used))
 }
