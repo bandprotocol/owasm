@@ -46,22 +46,13 @@ impl InMemoryCache {
 
 #[derive(Clone, Debug)]
 pub struct CacheOptions {
-    // pub base_dir: PathBuf,
-    // pub supported_features: HashSet<String>,
     pub memory_cache_size: Size,
-    // /// Memory limit for instances, in bytes. Use a value that is divisible by the Wasm page size 65536,
-    // /// e.g. full MiBs.
     // pub instance_memory_limit: Size,
 }
 
 pub struct Cache {
-    // wasm_path: PathBuf,
-    // supported_features: HashSet<String>,
-    /// Instances memory limit in bytes. Use a value that is divisible by the Wasm page size 65536,
-    /// e.g. full MiBs.
     // instance_memory_limit: Size,
     memory_cache: InMemoryCache,
-    // store: wasmer::Store,
     stats: Stats,
 }
 

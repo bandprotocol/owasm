@@ -2,8 +2,7 @@ pub mod cache;
 pub mod error;
 pub mod vm;
 
-use cache::{Cache, CacheOptions};
-use cosmwasm_vm::Size;
+use cache::Cache;
 use vm::Environment;
 
 pub use error::Error;
@@ -37,8 +36,6 @@ static SUPPORTED_IMPORTS: &[&str] = &[
     "env.get_external_data_status",
     "env.read_external_data",
 ];
-
-static mut CACHE: Option<Cache> = None;
 
 fn inject_memory(module: Module) -> Result<Module, Error> {
     let mut m = module;
@@ -138,17 +135,17 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
     Ok(())
 }
 
-pub fn run<E>(code: &[u8], gas: u32, is_prepare: bool, env: E) -> Result<u32, Error>
+pub fn run<E>(
+    cache: &mut Cache,
+    code: &[u8],
+    gas: u32,
+    is_prepare: bool,
+    env: E,
+) -> Result<u32, Error>
 where
     E: vm::Env + 'static,
 {
-    let f = Instant::now();
-
-    unsafe {
-        if CACHE.is_none() {
-            CACHE = Some(Cache::new(CacheOptions { memory_cache_size: Size::mebi(16) }));
-        }
-    }
+    let start = Instant::now();
 
     let owasm_env = Environment::new(env, gas);
 
@@ -257,16 +254,8 @@ where
             }),
         },
     };
-    let instance = unsafe {
-        let cache = CACHE.as_mut().unwrap();
-        cache.get_instance(code, &store, &import_object)?
-    };
 
-    let dur = Instant::now() - f;
-
-    let stats = unsafe { CACHE.as_ref().unwrap().stats() };
-    println!("[{}] hits: {}, misses: {}", dur.as_nanos(), stats.hits, stats.misses);
-
+    let instance = cache.get_instance(code, &store, &import_object)?;
     let instance_ptr = NonNull::from(&instance);
     owasm_env.set_wasmer_instance(Some(instance_ptr));
 
@@ -292,6 +281,14 @@ where
             Error::RuntimeError
         })
     })?;
+
+    let dur = Instant::now() - start;
+    println!(
+        "[{}] hits: {}, misses: {}",
+        dur.as_millis(),
+        cache.stats().hits,
+        cache.stats().misses
+    );
 
     Ok(owasm_env.with_vm(|vm| vm.gas_used))
 }
