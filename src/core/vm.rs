@@ -55,7 +55,7 @@ where
     }
 
     pub fn out_of_gas(&self) -> bool {
-        self.gas_used >= self.gas_limit
+        self.gas_used > self.gas_limit
     }
 }
 

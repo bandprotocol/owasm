@@ -30,28 +30,22 @@ impl InMemoryCache {
         InMemoryCache { modules: CLruCache::new(max_entries) }
     }
 
-    pub fn store(&mut self, checksum: &Checksum, module: &Module) -> Result<(), Error> {
-        self.modules.put(*checksum, module.clone());
-        Ok(())
+    pub fn store(&mut self, checksum: &Checksum, module: Module) -> Option<Module> {
+        self.modules.put(*checksum, module)
     }
 
     /// Looks up a module in the cache and creates a new module
-    pub fn load(&mut self, checksum: &Checksum) -> Result<Option<Module>, Error> {
-        match self.modules.get(checksum) {
-            Some(module) => Ok(Some(module.clone())),
-            None => Ok(None),
-        }
+    pub fn load(&mut self, checksum: &Checksum) -> Option<Module> {
+        self.modules.get(checksum).map(|m| m.clone())
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct CacheOptions {
     pub memory_cache_size: Size,
-    // pub instance_memory_limit: Size,
 }
 
 pub struct Cache {
-    // instance_memory_limit: Size,
     memory_cache: InMemoryCache,
     stats: Stats,
 }
@@ -76,7 +70,7 @@ impl Cache {
         let checksum = Checksum::generate(wasm);
 
         // lookup cache
-        if let Some(module) = self.memory_cache.load(&checksum).unwrap() {
+        if let Some(module) = self.memory_cache.load(&checksum) {
             self.stats.hits += 1;
             return Ok(Instance::new(&module, &import_object).unwrap());
         }
@@ -84,8 +78,11 @@ impl Cache {
 
         // recompile
         let module = Module::new(store, &wasm).map_err(|_| Error::InstantiationError)?;
-        self.memory_cache.store(&checksum, &module)?;
+        let instance =
+            Instance::new(&module, &import_object).map_err(|_| Error::InstantiationError)?;
 
-        Ok(Instance::new(&module, &import_object).map_err(|_| Error::InstantiationError)?)
+        self.memory_cache.store(&checksum, module);
+
+        Ok(instance)
     }
 }
