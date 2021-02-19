@@ -12,10 +12,8 @@ pub use std::ptr::NonNull;
 
 use pwasm_utils::{self, rules};
 
-use wasmer_runtime_core::wasmparser;
-
-use wasmer::{imports, Function, Store};
-use wasmer_engine_jit::JIT;
+use wasmer::Singlepass;
+use wasmer::{imports, wasmparser, Function, Store, JIT};
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -112,7 +110,7 @@ fn check_wasm_imports(module: &Module) -> Result<(), Error> {
 
 pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
     // Check that the given Wasm code is indeed a valid Wasm.
-    wasmparser::validate(code, None).map_err(|_| Error::ValidationError)?;
+    wasmparser::validate(code).map_err(|_| Error::ValidationError)?;
 
     // Start the compiling chains.
     let module = elements::deserialize_buffer(code).map_err(|_| Error::DeserializationError)?;
@@ -145,7 +143,7 @@ where
 {
     let owasm_env = Environment::new(env, gas);
 
-    let compiler = wasmer_compiler_singlepass::Singlepass::new();
+    let compiler = Singlepass::new();
     let store = Store::new(&JIT::new(compiler).engine());
 
     let import_object = imports! {
@@ -163,6 +161,7 @@ where
             "read_calldata" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, ptr: i64| {
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
+                    // consume gas equal size of span when read calldata
                     vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory()?;
@@ -185,6 +184,7 @@ where
                         return Err(Error::SpanTooSmallError);
                     }
 
+                    // consume gas equal size of span when save data to memory
                     vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory()?;
@@ -217,6 +217,7 @@ where
                         return Err(Error::SpanTooSmallError);
                     }
 
+                    // consume gas equal size of span when write calldata for raw request
                     vm.consume_gas(span_size  as u32)?;
 
                     let memory = env.memory()?;
@@ -234,6 +235,7 @@ where
             "read_external_data" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, eid: i64, vid: i64, ptr: i64| {
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
+                    // consume gas equal size of span when read data from report
                     vm.consume_gas(span_size  as u32)?;
 
                     let memory = env.memory()?;
