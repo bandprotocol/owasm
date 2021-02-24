@@ -1,15 +1,19 @@
+pub mod cache;
 pub mod error;
 pub mod vm;
 
+use cache::Cache;
+use vm::Environment;
+
 pub use error::Error;
 use parity_wasm::builder;
-use parity_wasm::elements::{self, External, ImportEntry, MemoryType, Module};
+use parity_wasm::elements::{self, External, MemoryType, Module};
+pub use std::ptr::NonNull;
 
 use pwasm_utils::{self, rules};
-use std::ffi::c_void;
-use wasmer_runtime::Ctx;
-use wasmer_runtime_core::error::RuntimeError;
-use wasmer_runtime_core::{func, imports, wasmparser, Func};
+
+use wasmer::Singlepass;
+use wasmer::{imports, wasmparser, Function, Store, JIT};
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -86,7 +90,7 @@ fn check_wasm_exports(module: &Module) -> Result<(), Error> {
 }
 
 fn check_wasm_imports(module: &Module) -> Result<(), Error> {
-    let required_imports: Vec<ImportEntry> =
+    let required_imports =
         module.import_section().map_or(vec![], |import_section| import_section.entries().to_vec());
 
     for required_import in required_imports {
@@ -96,16 +100,18 @@ fn check_wasm_imports(module: &Module) -> Result<(), Error> {
         }
 
         match required_import.external() {
-            External::Function(_) => {} // ok
+            External::Function(_) => (), // ok
             _ => return Err(Error::InvalidImportsError),
         };
     }
+
     Ok(())
 }
 
 pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
     // Check that the given Wasm code is indeed a valid Wasm.
-    wasmparser::validate(code, None).map_err(|_| Error::ValidationError)?;
+    wasmparser::validate(code).map_err(|_| Error::ValidationError)?;
+
     // Start the compiling chains.
     let module = elements::deserialize_buffer(code).map_err(|_| Error::DeserializationError)?;
     check_wasm_exports(&module)?;
@@ -113,126 +119,168 @@ pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
     let module = inject_memory(module)?;
     let module = inject_gas(module)?;
     let module = inject_stack_height(module)?;
+
     // Serialize the final Wasm code back to bytes.
     elements::serialize(module).map_err(|_| Error::SerializationError)
 }
-
-struct ImportReference(*mut c_void);
-unsafe impl Send for ImportReference {}
-unsafe impl Sync for ImportReference {}
 
 fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error> {
     if max_range < require_range {
         return Err(Error::MemoryOutOfBoundError);
     }
-    return Ok(());
+    Ok(())
 }
 
-pub fn run<E>(code: &[u8], gas: u32, is_prepare: bool, env: &E) -> Result<u32, Error>
+pub fn run<E>(
+    cache: &mut Cache,
+    code: &[u8],
+    gas: u32,
+    is_prepare: bool,
+    env: E,
+) -> Result<u32, Error>
 where
-    E: vm::Env,
+    E: vm::Env + 'static,
 {
-    let vm = &mut vm::VMLogic::new(env, gas);
-    let raw_ptr = vm as *mut _ as *mut c_void;
-    let import_reference = ImportReference(raw_ptr);
+    let owasm_env = Environment::new(env, gas);
+
+    let compiler = Singlepass::new();
+    let store = Store::new(&JIT::new(compiler).engine());
+
     let import_object = imports! {
-        move || (import_reference.0, (|_: *mut c_void| {}) as fn(*mut c_void)),
         "env" => {
-            "gas" => func!(|ctx: &mut Ctx, gas: u32| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                vm.consume_gas(gas)
+            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, gas: u32| {
+                env.with_mut_vm(|vm| {
+                    vm.consume_gas(gas)
+                })
             }),
-            "get_span_size" =>  func!(|ctx: &mut Ctx| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                vm.env.get_span_size()
+            "get_span_size" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
+                env.with_vm(|vm| {
+                    vm.env.get_span_size()
+                })
             }),
-            "read_calldata" => func!(|ctx: &mut Ctx, ptr: i64| -> Result<i64, Error> {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                let span_size = vm.env.get_span_size();
-                vm.consume_gas(span_size as u32)?;
-                require_mem_range(ctx.memory(0).size().bytes().0, (ptr + span_size) as usize)?;
-                let data = vm.env.get_calldata()?;
-                for (idx, byte) in data.iter().enumerate() {
-                    ctx.memory(0).view()[ptr as usize + idx].set(*byte)
-                }
-                Ok(data.len() as i64)
+            "read_calldata" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, ptr: i64| {
+                env.with_mut_vm(|vm| -> Result<i64, Error>{
+                    let span_size = vm.env.get_span_size();
+                    // consume gas equal size of span when read calldata
+                    vm.consume_gas(span_size as u32)?;
+
+                    let memory = env.memory()?;
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+
+                    let data = vm.env.get_calldata()?;
+
+                    for (idx, byte) in data.iter().enumerate() {
+                        memory.view()[ptr as usize + idx].set(*byte);
+                    }
+
+                    Ok(data.len() as i64)
+                })
             }),
-            "set_return_data" => func!(|ctx: &mut Ctx, ptr: i64, len: i64| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                let span_size = vm.env.get_span_size();
-                if len > span_size {
-                    return Err(Error::SpanTooSmallError);
-                }
-                vm.consume_gas(span_size as u32)?;
-                require_mem_range(ctx.memory(0).size().bytes().0, (ptr + len) as usize)?;
-                let data: Vec<u8> = ctx.memory(0).view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
-                vm.env.set_return_data(&data)
+            "set_return_data" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, ptr: i64, len: i64| {
+                env.with_mut_vm(|vm| {
+                    let span_size = vm.env.get_span_size();
+
+                    if len > span_size {
+                        return Err(Error::SpanTooSmallError);
+                    }
+
+                    // consume gas equal size of span when save data to memory
+                    vm.consume_gas(span_size as u32)?;
+
+                    let memory = env.memory()?;
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+
+                    let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
+                    vm.env.set_return_data(&data)
+                })
             }),
-            "get_ask_count" => func!(|ctx: &mut Ctx| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                vm.env.get_ask_count()
+            "get_ask_count" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
+                env.with_vm(|vm| {
+                    vm.env.get_ask_count()
+                })
             }),
-            "get_min_count" => func!(|ctx: &mut Ctx| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                vm.env.get_min_count()
+            "get_min_count" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
+                env.with_vm(|vm| {
+                    vm.env.get_min_count()
+                })
             }),
-            "get_ans_count" => func!(|ctx: &mut Ctx| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                vm.env.get_ans_count()
+            "get_ans_count" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
+                env.with_vm(|vm| {
+                    vm.env.get_ans_count()
+                })
             }),
-            "ask_external_data" => func!(|ctx: &mut Ctx, eid: i64, did: i64, ptr: i64, len: i64| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                let span_size = vm.env.get_span_size();
-                if len > span_size {
-                    return Err(Error::SpanTooSmallError);
-                }
-                vm.consume_gas(span_size  as u32)?;
-                require_mem_range(ctx.memory(0).size().bytes().0, (ptr + len) as usize)?;
-                let data: Vec<u8> = ctx.memory(0).view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
-                vm.env.ask_external_data(eid, did, &data)
+            "ask_external_data" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, eid: i64, did: i64, ptr: i64, len: i64| {
+                env.with_mut_vm(|vm| {
+                    let span_size = vm.env.get_span_size();
+
+                    if len > span_size {
+                        return Err(Error::SpanTooSmallError);
+                    }
+
+                    // consume gas equal size of span when write calldata for raw request
+                    vm.consume_gas(span_size  as u32)?;
+
+                    let memory = env.memory()?;
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+
+                    let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
+                    vm.env.ask_external_data(eid, did, &data)
+                })
             }),
-            "get_external_data_status" => func!(|ctx: &mut Ctx, eid: i64, vid: i64| {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                vm.env.get_external_data_status(eid, vid)
+            "get_external_data_status" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, eid: i64, vid: i64| {
+                env.with_vm(|vm| {
+                    vm.env.get_external_data_status(eid, vid)
+                })
             }),
-            "read_external_data" => func!(|ctx: &mut Ctx, eid: i64, vid: i64, ptr: i64| -> Result<i64, Error> {
-                let vm: &mut vm::VMLogic<E> = unsafe { &mut *(ctx.data as *mut vm::VMLogic<E>) };
-                let span_size = vm.env.get_span_size();
-                vm.consume_gas(span_size as u32)?;
-                require_mem_range(ctx.memory(0).size().bytes().0, (ptr + span_size) as usize)?;
-                let data = vm.env.get_external_data(eid, vid)?;
-                for (idx, byte) in data.iter().enumerate() {
-                    ctx.memory(0).view()[ptr as usize + idx].set(*byte)
-                }
-                Ok(data.len() as i64)
+            "read_external_data" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, eid: i64, vid: i64, ptr: i64| {
+                env.with_mut_vm(|vm| -> Result<i64, Error>{
+                    let span_size = vm.env.get_span_size();
+                    // consume gas equal size of span when read data from report
+                    vm.consume_gas(span_size  as u32)?;
+
+                    let memory = env.memory()?;
+                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+
+                    let data = vm.env.get_external_data(eid, vid)?;
+
+                    for (idx, byte) in data.iter().enumerate() {
+                        memory.view()[ptr as usize + idx].set(*byte);
+                    }
+
+                    Ok(data.len() as i64)
+                })
             }),
         },
     };
 
-    let module = wasmer_runtime_core::compile_with_config(
-        code,
-        &wasmer_singlepass_backend::SinglePassCompiler::new(),
-        wasmer_runtime_core::backend::CompilerConfig {
-            nan_canonicalization: true,
-            ..Default::default()
-        },
-    )
-    .map_err(|_| Error::InstantiationError)?;
-    let instance = module.instantiate(&import_object).map_err(|_| Error::InstantiationError)?;
+    let instance = cache.get_instance(code, &store, &import_object)?;
+    let instance_ptr = NonNull::from(&instance);
+    owasm_env.set_wasmer_instance(Some(instance_ptr));
+
+    // get function and exec
     let entry = if is_prepare { "prepare" } else { "execute" };
-    let function: Func<(), ()> =
-        instance.exports.get(entry).map_err(|_| Error::BadEntrySignatureError)?;
-    function.call().map_err(|err| match err {
-        RuntimeError::User(uerr) => {
-            if let Some(err) = uerr.downcast_ref::<Error>() {
-                err.clone()
-            } else {
-                Error::UnknownError
-            }
+    let function = instance
+        .exports
+        .get_function(entry)
+        .unwrap()
+        .native::<(), ()>()
+        .map_err(|_| Error::BadEntrySignatureError)?;
+
+    function.call().map_err(|runtime_err| {
+        if let Ok(err) = runtime_err.downcast::<Error>() {
+            return err.clone();
         }
-        _ => Error::RuntimeError,
+
+        owasm_env.with_vm(|vm| {
+            if vm.out_of_gas() {
+                return Error::OutOfGasError;
+            }
+
+            Error::RuntimeError
+        })
     })?;
-    Ok(vm.gas_used)
+
+    Ok(owasm_env.with_vm(|vm| vm.gas_used))
 }
 
 #[cfg(test)]
