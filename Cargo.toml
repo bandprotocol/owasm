@@ -19,4 +19,4 @@ pwasm-utils = "0.12"
 wasmer = { version = "1.0.2", default-features = false, features = ["jit", "singlepass", "compiler"] }
 tempfile = "3.1.0"
 clru = "0.2.0"
-cosmwasm-vm = "0.13.2"
+cosmwasm-vm = { git = "https://github.com/CosmWasm/cosmwasm", rev = "263202f13fef3bfabc2e1036514667812f0e7e62" }
