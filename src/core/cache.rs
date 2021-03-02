@@ -1,10 +1,8 @@
 use crate::core::error::Error;
 
 use clru::CLruCache;
-use cosmwasm_vm::{Checksum, Size};
+use cosmwasm_vm::Checksum;
 use wasmer::{Instance, Module, Store};
-
-const ESTIMATED_MODULE_SIZE: Size = Size::mebi(10);
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Stats {
@@ -25,9 +23,8 @@ pub struct InMemoryCache {
 
 impl InMemoryCache {
     /// Creates a new cache with the given size (in bytes)
-    pub fn new(size: Size) -> Self {
-        let max_entries = size.0 / ESTIMATED_MODULE_SIZE.0;
-        InMemoryCache { modules: CLruCache::new(max_entries) }
+    pub fn new(entries: usize) -> Self {
+        InMemoryCache { modules: CLruCache::new(entries) }
     }
 
     pub fn store(&mut self, checksum: &Checksum, module: Module) -> Option<Module> {
@@ -42,7 +39,7 @@ impl InMemoryCache {
 
 #[derive(Clone, Debug)]
 pub struct CacheOptions {
-    pub memory_cache_size: Size,
+    pub cache_size: usize,
 }
 
 pub struct Cache {
@@ -52,9 +49,9 @@ pub struct Cache {
 
 impl Cache {
     pub fn new(options: CacheOptions) -> Self {
-        let CacheOptions { memory_cache_size } = options;
+        let CacheOptions { cache_size } = options;
 
-        Self { memory_cache: InMemoryCache::new(memory_cache_size), stats: Stats::new() }
+        Self { memory_cache: InMemoryCache::new(cache_size), stats: Stats::new() }
     }
 
     pub fn stats(&self) -> &Stats {
