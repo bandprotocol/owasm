@@ -23,8 +23,8 @@ pub struct InMemoryCache {
 
 impl InMemoryCache {
     /// Creates a new cache with the given size (in bytes)
-    pub fn new(entries: usize) -> Self {
-        InMemoryCache { modules: CLruCache::new(entries) }
+    pub fn new(entries: u32) -> Self {
+        InMemoryCache { modules: CLruCache::new(entries as usize) }
     }
 
     pub fn store(&mut self, checksum: &Checksum, module: Module) -> Option<Module> {
@@ -39,7 +39,7 @@ impl InMemoryCache {
 
 #[derive(Clone, Debug)]
 pub struct CacheOptions {
-    pub cache_size: usize,
+    pub cache_size: u32,
 }
 
 pub struct Cache {
