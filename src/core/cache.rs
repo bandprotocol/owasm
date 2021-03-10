@@ -115,7 +115,7 @@ mod test {
 
         match cache.get_instance(&wasm, &store, &import_object) {
             Ok(instance) => instance,
-            Err(e) => panic!(e),
+            Err(_) => panic!("Fail to get instance"),
         }
     }
 
@@ -148,12 +148,12 @@ mod test {
 
         let ser1 = match instance1.module().serialize() {
             Ok(r) => r,
-            Err(e) => panic!(e),
+            Err(_) => panic!("Fail to serialize module"),
         };
 
         let ser2 = match instance2.module().serialize() {
             Ok(r) => r,
-            Err(e) => panic!(e),
+            Err(_) => panic!("Fail to serialize module"),
         };
 
         assert_eq!(ser1, ser2);
