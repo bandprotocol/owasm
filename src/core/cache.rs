@@ -129,11 +129,22 @@ mod test {
               )"#,
         );
 
+        let wasm2 = wat2wasm(
+            r#"(module
+                (func $execute (export "execute"))
+                (func $prepare (export "prepare"))
+                (func $foo2 (export "foo2"))
+              )"#,
+        );
+
         let instance1 = get_instance_without_err(&mut cache, &wasm);
         assert_eq!(&Stats { hits: 0, misses: 1 }, cache.stats());
 
         let instance2 = get_instance_without_err(&mut cache, &wasm);
         assert_eq!(&Stats { hits: 1, misses: 1 }, cache.stats());
+
+        get_instance_without_err(&mut cache, &wasm2);
+        assert_eq!(&Stats { hits: 1, misses: 2 }, cache.stats());
 
         let ser1 = match instance1.module().serialize() {
             Ok(r) => r,
