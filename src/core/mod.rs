@@ -12,8 +12,7 @@ pub use std::ptr::NonNull;
 
 use pwasm_utils::{self, rules};
 
-use wasmer::Singlepass;
-use wasmer::{imports, wasmparser, Function, Store, JIT};
+use wasmer::{imports, wasmparser, Function, Singlepass, Store, JIT};
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
