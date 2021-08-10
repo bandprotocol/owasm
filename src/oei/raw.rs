@@ -2,6 +2,8 @@ extern "C" {
     pub fn get_span_size() -> i64;
     pub fn get_ask_count() -> i64;
     pub fn get_min_count() -> i64;
+    pub fn get_prepare_time() -> i64;
+    pub fn get_execute_time() -> i64;
     pub fn get_ans_count() -> i64;
     pub fn read_calldata(offset: i64) -> i64;
     pub fn set_return_data(offset: i64, len: i64);

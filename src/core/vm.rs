@@ -15,6 +15,10 @@ pub trait Env {
     fn get_ask_count(&self) -> i64;
     /// Returns the current "min count" value.
     fn get_min_count(&self) -> i64;
+    /// Returns the prepare block time of the request.
+    fn get_prepare_time(&self) -> i64;
+    /// Returns the execute block time of the request, or error from VM runner if called on wrong period.
+    fn get_execute_time(&self) -> i64;
     /// Returns the current "ans count" value, or error from VM runner if called on wrong period.
     fn get_ans_count(&self) -> Result<i64, Error>;
     /// Issues a new external data request to VM runner, with the specified ids and calldata.

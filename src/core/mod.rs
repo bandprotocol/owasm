@@ -26,6 +26,8 @@ static SUPPORTED_IMPORTS: &[&str] = &[
     "env.set_return_data",
     "env.get_ask_count",
     "env.get_min_count",
+    "env.get_prepare_time",
+    "env.get_execute_time",
     "env.get_ans_count",
     "env.ask_external_data",
     "env.get_external_data_status",
@@ -201,6 +203,16 @@ where
             "get_min_count" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
                 env.with_vm(|vm| {
                     vm.env.get_min_count()
+                })
+            }),
+            "get_prepare_time" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
+                env.with_vm(|vm| {
+                    vm.env.get_prepare_time()
+                })
+            }),
+            "get_execute_time" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
+                env.with_vm(|vm| {
+                    vm.env.get_execute_time()
                 })
             }),
             "get_ans_count" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
