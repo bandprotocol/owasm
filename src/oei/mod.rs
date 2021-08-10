@@ -10,6 +10,17 @@ pub fn get_min_count() -> i64 {
     unsafe { raw::get_min_count() }
 }
 
+/// Return the prepare block time as specified by the oracle request.
+pub fn get_prepare_time() -> i64 {
+    unsafe { raw::get_prepare_time() }
+}
+
+/// Return the execute block time during the call of execution phase. Must only
+/// be called during execution phase.
+pub fn get_execute_time() -> i64 {
+    unsafe { raw::get_execute_time() }
+}
+
 /// Returns the number of validators that report data to this oracle request. Must
 /// only be called during execution phase.
 pub fn get_ans_count() -> i64 {
