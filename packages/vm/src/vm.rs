@@ -1,4 +1,4 @@
-use crate::core::error::Error;
+use crate::error::Error;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, RwLock};
 

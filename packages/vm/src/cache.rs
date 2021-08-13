@@ -1,4 +1,4 @@
-use crate::core::error::Error;
+use crate::error::Error;
 
 use clru::CLruCache;
 use cosmwasm_vm::Checksum;
