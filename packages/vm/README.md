@@ -1,9 +1,5 @@
 # Owasm
 
-[![owasm on crates.io](https://img.shields.io/crates/v/owasm.svg)](https://crates.io/crates/owasm)
+[![owasm-vm on crates.io](https://img.shields.io/crates/v/owasm-vm.svg)](https://crates.io/crates/owasm-vm)
 
-The standard libraries for building BandChain oracle scripts. Code in this package is split into 3 packages -- `core`, `ext`, and `oei`.
-
-`core` - a library for building VM runtime
-`ext` - a library is helper package for writing the oracle scripts 
-`oei` - a library containing functions for querying data from BandChain
+The core library for building VM runtime of BandChain oracle scripts.
