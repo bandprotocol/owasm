@@ -1,4 +1,4 @@
-# Owasm
+# Owasm Std
 
 [![owasm-std on crates.io](https://img.shields.io/crates/v/owasm-std.svg)](https://crates.io/crates/owasm-std)
 
