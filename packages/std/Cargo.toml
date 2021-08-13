@@ -1,0 +1,12 @@
+[package]
+name = "owasm-std"
+version = "0.1.12"
+authors = ["Band Protocol <connect@bandprotocol.com>"]
+edition = "2018"
+license = "Apache-2.0"
+repository = "https://github.com/bandprotocol/owasm/tree/master/packages/std"
+description = "Standard library for oracle scripts on BandChain"
+readme = "README.md"
+
+[dependencies]
+num = "0.2.1"

@@ -1,4 +1,4 @@
-use crate::core::error::Error;
+use crate::error::Error;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -18,7 +18,7 @@ pub trait Env {
     /// Returns the prepare block time of the request.
     fn get_prepare_time(&self) -> i64;
     /// Returns the execute block time of the request, or error from VM runner if called on wrong period.
-    fn get_execute_time(&self) -> i64;
+    fn get_execute_time(&self) -> Result<i64, Error>;
     /// Returns the current "ans count" value, or error from VM runner if called on wrong period.
     fn get_ans_count(&self) -> Result<i64, Error>;
     /// Issues a new external data request to VM runner, with the specified ids and calldata.
