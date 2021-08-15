@@ -1,10 +1,10 @@
 [package]
 name = "owasm-kit"
-version = "0.1.12"
+version = "0.1.13"
 authors = ["Band Protocol <connect@bandprotocol.com>"]
 edition = "2018"
 license = "Apache-2.0"
-repository = "https://github.com/bandprotocol/owasm/tree/master/packages/std"
+repository = "https://github.com/bandprotocol/owasm/tree/master/packages/kit"
 description = "Standard library for oracle scripts on BandChain"
 readme = "README.md"
 
