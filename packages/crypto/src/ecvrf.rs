@@ -14,9 +14,6 @@ macro_rules! some_or_return_false {
 
 lazy_static! {
     static ref SUITE_STRING: Vec<u8> = decode("04").unwrap();
-    static ref DST: Vec<u8> =
-        decode("45435652465f6564776172647332353531395f584d443a5348412d3531325f454c4c325f4e555f04")
-            .unwrap();
     static ref BITS: usize = 256;
     static ref PRIME: Integer =
         "57896044618658097711785492504343953926634992332820282019728792003956564819949"
@@ -166,68 +163,24 @@ pub fn ecvrf_decode_proof(pi: &[u8]) -> Option<((Integer, Integer), Integer, Int
     Some((gamma, c, s))
 }
 
-pub fn i2osp(x: &Integer, x_len: u8) -> Option<Vec<u8>> {
-    match x_len {
-        1 => {
-            if Integer::from(x >> 8) >= 1 {
-                return None;
-            }
-        }
-        2 => {
-            if Integer::from(x >> 16) >= 1 {
-                return None;
-            }
-        }
-        128 => {
-            if Integer::from(x >> 1024) >= 1 {
-                return None;
-            }
-        }
-        _ => return None,
-    }
-    let mut digits = vec![0u8; x_len as usize];
-    let mut tmp_x = x.clone();
-    for i in (0..(x_len as usize)).rev() {
-        digits[i] = (&tmp_x & Integer::from(255)).to_u8().unwrap();
-        tmp_x >>= 8;
-        if tmp_x == 0 {
-            break;
-        }
-    }
-
-    Some(digits)
+pub fn expand_message_xmd(msg: &[u8]) -> Option<Vec<u8>> {
+    let dst_prime = vec![
+        69, 67, 86, 82, 70, 95, 101, 100, 119, 97, 114, 100, 115, 50, 53, 53, 49, 57, 95, 88, 77,
+        68, 58, 83, 72, 65, 45, 53, 49, 50, 95, 69, 76, 76, 50, 95, 78, 85, 95, 4, 40,
+    ];
+    let msg_prime = [&[0u8; 128], msg, &[0, 48], &[0], &dst_prime].concat();
+    Some(hash(&[hash(&msg_prime), vec![1], dst_prime].concat()))
 }
 
-pub fn os2ip(x: &[u8]) -> Integer {
-    Integer::from_digits(x, Order::Msf)
-}
-
-pub fn expand_message_xmd(msg: &[u8], dst: &[u8], len_in_bytes: &Integer) -> Option<Vec<u8>> {
-    let dst_prime = [dst, &i2osp(&Integer::from(dst.len()), 1)?].concat();
-    let z_pad = i2osp(&Integer::from(0), 128)?;
-    let l_i_b_str = i2osp(len_in_bytes, 2)?;
-    let msg_prime = [
-        &z_pad,
-        msg,
-        &l_i_b_str,
-        &i2osp(&Integer::from(0), 1)?,
-        &dst_prime,
-    ]
-    .concat();
-    Some(hash(
-        &[hash(&msg_prime), i2osp(&Integer::from(1), 1)?, dst_prime].concat(),
+pub fn hash_to_field(msg: &[u8]) -> Option<Integer> {
+    Some(modulus(
+        &Integer::from_digits(&expand_message_xmd(msg)?[..48], Order::Msf),
+        &*PRIME,
     ))
 }
 
-pub fn hash_to_field(msg: &[u8], count: &Integer) -> Option<Integer> {
-    let m = Integer::from(1);
-    let l = Integer::from(48);
-    let uniform_bytes = expand_message_xmd(msg, &*DST, &(count * m * l))?;
-    Some(modulus(&os2ip(&uniform_bytes[..48]), &*PRIME))
-}
-
 pub fn ecvrf_hash_to_curve_elligator2_25519(y: &[u8], alpha: &[u8]) -> Option<Vec<u8>> {
-    let u = hash_to_field(&[y, alpha].concat(), &Integer::from(1))?;
+    let u = hash_to_field(&[y, alpha].concat())?;
 
     let mut tv1 = (&u * &u).complete();
     tv1 = modulus(&(2 * tv1), &*PRIME);
@@ -587,54 +540,17 @@ mod tests {
     }
 
     #[test]
-    fn i2osp_test() {
-        assert_eq!(i2osp(&"300".parse::<Integer>().unwrap(), 1), None);
-        assert_eq!(
-            encode(i2osp(&"200".parse::<Integer>().unwrap(), 1).unwrap()),
-            "c8"
-        );
-        assert_eq!(i2osp(&"55555".parse::<Integer>().unwrap(), 1), None);
-        assert_eq!(
-            encode(i2osp(&"55555".parse::<Integer>().unwrap(), 2).unwrap()),
-            "d903"
-        );
-        assert_eq!(i2osp(&"179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137216".parse::<Integer>().unwrap(), 128), None);
-        assert_eq!(
-            encode(i2osp(&"179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137215".parse::<Integer>().unwrap(), 128).unwrap()),
-            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-        );
-        assert_eq!(
-            encode(i2osp(&"12156183745850511073089323218562745643254017618359848732866684019020326374996".parse::<Integer>().unwrap(), 128).unwrap()),
-            "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001ae027fb30a0ad4249925c94f4a2bfc6e0912f56ec69132788daf248bff20e54"
-        );
-    }
-
-    #[test]
-    fn os2ip_test() {
-        assert_eq!(os2ip(&vec![1, 2, 3]), "66051".parse::<Integer>().unwrap());
-        assert_eq!(
-            os2ip(&vec![
-                87, 99, 51, 71, 222, 66, 154, 126, 184, 43, 4, 251, 92, 179, 117, 77, 198, 21, 225,
-                149, 206, 82, 57, 150, 44, 149, 111, 204, 203, 185, 28, 254
-            ]),
-            "39526489612783863363061450190903516942151074871840484375217699171994072325374"
-                .parse::<Integer>()
-                .unwrap()
-        );
-    }
-
-    #[test]
     fn expand_message_xmd_test() {
         assert_eq!(
-            expand_message_xmd(&vec![] ,&*DST,&Integer::from(48)).unwrap(),
+            expand_message_xmd(&vec![]).unwrap(),
             decode("de5b8109b80da1d4861defe3e20710c8ac2efe65d815bb79d0b0087ddb0667718adb94fa478843979611e80749109ca55881a12b9d64c9ae5f7b36075f8e0354").unwrap()
         );
         assert_eq!(
-            expand_message_xmd(&decode("0102040810204080ff").unwrap() ,&*DST,&Integer::from(48)).unwrap(),
+            expand_message_xmd(&decode("0102040810204080ff").unwrap()).unwrap(),
             decode("916b471e7c4d60e8a4ba6d0310e4e8de5a59d94011c4e8d2843d452a1651b9f854f5582788dec477b3811cd56973dbbba346a98877ffd1b61d045caccbdddbe8").unwrap()
         );
         assert_eq!(
-            expand_message_xmd(&decode("756f547ab8accc336a280f96343cfdbe9621935dcb452bba4f3460ef8f090883").unwrap() ,&*DST,&Integer::from(48)).unwrap(),
+            expand_message_xmd(&decode("756f547ab8accc336a280f96343cfdbe9621935dcb452bba4f3460ef8f090883").unwrap()).unwrap(),
             decode("365d2351f19838da62f7b68464f61e961a01cbc3fdde0099bdc3db6b3a9c3f8d23eeacc1865e570b063263d3e8ded3c4cd4a11566f96ca5f63d06bb65d815bb8").unwrap()
         );
     }
@@ -642,13 +558,13 @@ mod tests {
     #[test]
     fn hash_to_field_test() {
         assert_eq!(
-            hash_to_field(&vec![], &Integer::from(1)).unwrap(),
+            hash_to_field(&vec![]).unwrap(),
             "19984796091926620114398603282246129530205018809106914407141744082303129033320"
                 .parse::<Integer>()
                 .unwrap()
         );
         assert_eq!(
-            hash_to_field(&decode("0102040810204080ff").unwrap(), &Integer::from(1)).unwrap(),
+            hash_to_field(&decode("0102040810204080ff").unwrap()).unwrap(),
             "40866905167524404221649250981304847553674991259516901614549124933108104064175"
                 .parse::<Integer>()
                 .unwrap()
@@ -657,7 +573,6 @@ mod tests {
             hash_to_field(
                 &decode("6073bd567edb2e1d6ef03cb70a54017ffd5b874b136bbbddfbc5a8af6606b697")
                     .unwrap(),
-                &Integer::from(1)
             )
             .unwrap(),
             "42190151610809284644600066009282933920020180701265092905748556772002395560942"
@@ -668,7 +583,6 @@ mod tests {
             hash_to_field(
                 &decode("1152c7e217f100d85a6b7e51cb8e6c838a8fc8c95a5ab43ac7412a085cd67307431cd149b898b98c017fe1003bf848ad1dc2254b093497bfab90159ea54c5559")
                     .unwrap(),
-                &Integer::from(1)
             )
             .unwrap(),
             "7289615016767941863395051431412729080032480398674317575538643993554362504793"
