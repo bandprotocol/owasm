@@ -66,3 +66,9 @@ pub fn get_external_data(eid: i64, vid: i64) -> Result<String, i64> {
         }
     }
 }
+
+/// Return the verification result of ecvrf given a pubkey, a vrf proof, and the
+/// corresponding result. 
+pub fn ecvrf_verify(y: &[u8], pi: &[u8], alpha: &[u8]) -> bool {
+    unsafe { raw::ecvrf_verify(y, pi, alpha) }
+}

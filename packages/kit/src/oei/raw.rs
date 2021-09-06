@@ -10,4 +10,5 @@ extern "C" {
     pub fn ask_external_data(eid: i64, did: i64, offset: i64, len: i64);
     pub fn get_external_data_status(eid: i64, vid: i64) -> i64;
     pub fn read_external_data(eid: i64, vid: i64, offset: i64) -> i64;
+    pub fn ecvrf_verify(y: &[u8], pi: &[u8], alpha: &[u8]) -> bool;
 }

@@ -14,6 +14,8 @@ use pwasm_utils::{self, rules};
 
 use wasmer::{imports, wasmparser, Function, Singlepass, Store, JIT};
 
+use owasm_crypto::{ecvrf_verify}
+
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
 static MEMORY_LIMIT: u32 = 512; // in pages
@@ -259,6 +261,13 @@ where
                     }
 
                     Ok(data.len() as i64)
+                })
+            }),
+            "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, y: &[u8], pi: &[u8], alpha: &[u8]| {
+                env.with_vm(|vm| {
+                    // consume gas relatively to the function running time (~12ms)
+                    vm.consume_gas(700000)?;
+                    ecvrf_verify(y, pi, alpha)
                 })
             }),
         },
