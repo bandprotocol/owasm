@@ -14,7 +14,7 @@ use pwasm_utils::{self, rules};
 
 use wasmer::{imports, wasmparser, Function, Singlepass, Store, JIT};
 
-use owasm_crypto::{ecvrf_verify}
+use owasm_crypto::{ecvrf};
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -34,6 +34,7 @@ static SUPPORTED_IMPORTS: &[&str] = &[
     "env.ask_external_data",
     "env.get_external_data_status",
     "env.read_external_data",
+    "env.ecvrf_verify",
 ];
 
 fn inject_memory(module: Module) -> Result<Module, Error> {
@@ -132,6 +133,12 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
         return Err(Error::MemoryOutOfBoundError);
     }
     Ok(())
+}
+
+fn get_from_mem<E: vm::Env>(env: &Environment<E>, ptr: i64, len: i64) -> Result<Vec<u8>, Error> {
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, (ptr + len) as usize)?;
+    Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
 }
 
 pub fn run<E>(
@@ -263,11 +270,16 @@ where
                     Ok(data.len() as i64)
                 })
             }),
-            "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, y: &[u8], pi: &[u8], alpha: &[u8]| {
-                env.with_vm(|vm| {
+            "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, y_ptr: i64, y_len: i64, pi_ptr: i64, pi_len: i64, alpha_ptr: i64, alpha_len: i64| {
+                env.with_mut_vm(|vm| -> Result<u32, Error>{
                     // consume gas relatively to the function running time (~12ms)
-                    vm.consume_gas(700000)?;
-                    ecvrf_verify(y, pi, alpha)
+                    vm.consume_gas(500000)?;
+
+                    let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
+                    let pi: Vec<u8>= get_from_mem(env, pi_ptr, pi_len)?;
+                    let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
+                    
+                    Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
                 })
             }),
         },

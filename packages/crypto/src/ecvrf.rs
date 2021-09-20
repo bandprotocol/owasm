@@ -1,7 +1,6 @@
-use lazy_static::lazy_static;
 use hex::decode;
-use rug::{integer::Order, Complete, Integer};
 use sha2::{Digest, Sha512};
+use gmp::mpz::Mpz;
 
 macro_rules! some_or_return_false {
     ( $e:expr ) => {
@@ -15,46 +14,46 @@ macro_rules! some_or_return_false {
 lazy_static! {
     static ref SUITE_STRING: Vec<u8> = decode("04").unwrap();
     static ref BITS: usize = 256;
-    static ref PRIME: Integer =
+    static ref PRIME: Mpz =
         "57896044618658097711785492504343953926634992332820282019728792003956564819949"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref ORDER: Integer =
+    static ref ORDER: Mpz =
         "7237005577332262213973186563042994240857116359379907606001950938285454250989"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref COFACTOR: Integer = "8".parse::<Integer>().unwrap();
-    static ref TWO_INV: Integer =
+    static ref COFACTOR: Mpz = "8".parse::<Mpz>().unwrap();
+    static ref TWO_INV: Mpz =
         "28948022309329048855892746252171976963317496166410141009864396001978282409975"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref II: Integer =
+    static ref II: Mpz =
         "19681161376707505956807079304988542015446066515923890162744021073123829784752"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref A: Integer = "486662".parse::<Integer>().unwrap();
-    static ref D: Integer =
+    static ref A: Mpz = "486662".parse::<Mpz>().unwrap();
+    static ref D: Mpz =
         "37095705934669439343138083508754565189542113879843219016388785533085940283555"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref SQRT_MINUS_A_PLUS_2: Integer =
+    static ref SQRT_MINUS_A_PLUS_2: Mpz =
         "6853475219497561581579357271197624642482790079785650197046958215289687604742"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref BASE_X: Integer =
+    static ref BASE_X: Mpz =
         "15112221349535400772501151409588531511454012693041857206046113283949847762202"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref BASE_Y: Integer =
+    static ref BASE_Y: Mpz =
         "46316835694926478169428394003475163141307993866256225615783033603165251855960"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
-    static ref BASE: (Integer, Integer) = (
+    static ref BASE: (Mpz, Mpz) = (
         "15112221349535400772501151409588531511454012693041857206046113283949847762202"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap(),
         "46316835694926478169428394003475163141307993866256225615783033603165251855960"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap()
     );
 }
@@ -65,49 +64,51 @@ pub fn hash(h: &[u8]) -> Vec<u8> {
     hasher.finalize().to_vec()
 }
 
-pub fn x_recover(y: &Integer) -> Integer {
-    let xx = (y * y - Integer::from(1)) * inverse(&((&*D) * (y * y).complete() + Integer::from(1)));
-    let mut x = Integer::from(
-        xx.pow_mod_ref(&((&*PRIME + Integer::from(3)) >> 3), &*PRIME)
-            .unwrap(),
+pub fn x_recover(y: &Mpz) -> Mpz {
+    let xx = (y * y - 1) * inverse(&((&*D) * (y * y) + 1));
+    let mut x = Mpz::from(
+        xx.powm(&((&*PRIME + Mpz::from(3)) >> 3), &*PRIME),
     );
-    if modulus(&((&x * &x) - xx), &*PRIME) != Integer::from(0) {
-        x = modulus(&Integer::from(x * (&*II)), &*PRIME);
+    if modulus(&((&x * &x) - xx), &*PRIME) != Mpz::zero() {
+        x = modulus(&(&x * &*II), &*PRIME);
     }
-    if &x & Integer::from(1) != 0 {
+    if &x & Mpz::one() != Mpz::zero() {
         &*PRIME - x
     } else {
         x
     }
 }
 
-pub fn is_on_curve(p: &(Integer, Integer)) -> bool {
-    let x_2 = Integer::from(&p.0 * &p.0);
-    let y_2 = Integer::from(&p.1 * &p.1);
+pub fn is_on_curve(p: &(Mpz, Mpz)) -> bool {
+    let x_2 = Mpz::from(&p.0 * &p.0);
+    let y_2 = Mpz::from(&p.1 * &p.1);
+
     modulus(
-        &(Integer::from(&y_2 - &x_2) - 1 - x_2 * y_2 * (&*D)),
+        &(Mpz::from(&y_2 - &x_2) - 1 - x_2 * y_2 * (&*D)),
         &*PRIME,
-    ) == 0
+    ) == Mpz::zero()
 }
 
-pub fn encode_point(p: &(Integer, Integer)) -> Vec<u8> {
-    let mut q: Integer =
-        (&p.1 & ((Integer::from(1) << 255) - 1)) + (Integer::from(&p.0 & 1) << 255);
+pub fn encode_point(p: &(Mpz, Mpz)) -> Vec<u8> {
+    let mut q: Mpz =
+        (&p.1 & ((Mpz::one() << 255) - 1)) + ((&p.0 & Mpz::one()) << 255);
     let mut q_bytes_little: Vec<u8> = vec![0; 32];
     for i in 0..32 {
-        q_bytes_little[i] = Integer::from(&q & 255).to_u8().unwrap();
+        q_bytes_little[i] = u8::from_str_radix(&(&q & Mpz::from(255)).to_string(), 10).unwrap();
         q >>= 8;
-        if q < 1 {
+        if q < Mpz::one() {
             break;
         }
     }
     q_bytes_little
 }
 
-pub fn decode_point(s: &[u8]) -> Option<(Integer, Integer)> {
-    let y = Integer::from_digits(&s, Order::Lsf) & ((Integer::from(1) << 255) - 1);
+pub fn decode_point(s: &[u8]) -> Option<(Mpz, Mpz)> {
+    let mut s_rev: Vec<u8> = Vec::new(); 
+    s_rev.extend(s.iter().rev());
+    let y = Mpz::from(s_rev.as_slice()) & ((Mpz::from(1) << 255) - 1);
     let mut x = x_recover(&y);
-    if Integer::from(&x & 1) != (s.last()? >> 7) & 1 {
+    if Mpz::from(&x & Mpz::one()) != Mpz::from(((s.last()? >> 7u8) & 1) as u32) {
         x = &*PRIME - x;
     }
     let p = (x, y);
@@ -118,31 +119,31 @@ pub fn decode_point(s: &[u8]) -> Option<(Integer, Integer)> {
     }
 }
 
-pub fn modulus(a: &Integer, b: &Integer) -> Integer {
-    a.clone().div_rem_euc_ref(b).complete().1
+pub fn modulus(a: &Mpz, b: &Mpz) -> Mpz {
+    a.modulus(b)
 }
 
-pub fn inverse(a: &Integer) -> Integer {
-    a.clone().invert(&*PRIME).unwrap_or(Integer::from(1))
+pub fn inverse(a: &Mpz) -> Mpz {
+    a.invert(&*PRIME).unwrap_or(Mpz::one())
 }
 
-pub fn edwards_add(a: &(Integer, Integer), b: &(Integer, Integer)) -> (Integer, Integer) {
-    let x1_y2 = (&a.0 * &b.1).complete();
-    let x2_y1 = (&a.1 * &b.0).complete();
-    let all = D.clone() * &x1_y2 * &x2_y1;
-    let x3 = (x1_y2 + x2_y1) * inverse(&(Integer::from(1) + &all));
+pub fn edwards_add(a: &(Mpz, Mpz), b: &(Mpz, Mpz)) -> (Mpz, Mpz) {
+    let x1_y2 = &a.0 * &b.1;
+    let x2_y1 = &a.1 * &b.0;
+    let all = &*D * &x1_y2 * &x2_y1;
+    let x3 = (x1_y2 + x2_y1) * inverse(&(1 + &all));
     let y3 =
-        ((&a.0 * &b.0).complete() + (&a.1 * &b.1).complete()) * inverse(&(Integer::from(1) - &all));
+        ((&a.0 * &b.0) + (&a.1 * &b.1)) * inverse(&(1 - &all));
     (modulus(&x3, &*PRIME), modulus(&y3, &*PRIME))
 }
 
-pub fn scalar_multiply(p: &(Integer, Integer), scalar: &Integer) -> Option<(Integer, Integer)> {
-    if *scalar == 0 {
-        return Some((Integer::from(0), Integer::from(1)));
+pub fn scalar_multiply(p: &(Mpz, Mpz), scalar: &Mpz) -> Option<(Mpz, Mpz)> {
+    if *scalar == Mpz::zero() {
+        return Some((Mpz::zero(), Mpz::one()));
     }
-    let scalar_bin = &format!("{:b}", &scalar)[1..];
+    
     let mut q = p.clone();
-    for i in scalar_bin.chars() {
+    for i in scalar.to_str_radix(2)[1..].chars() {
         q = edwards_add(&q, &q);
         if i == '1' {
             q = edwards_add(&q, &p);
@@ -151,14 +152,20 @@ pub fn scalar_multiply(p: &(Integer, Integer), scalar: &Integer) -> Option<(Inte
     Some(q)
 }
 
-pub fn ecvrf_decode_proof(pi: &[u8]) -> Option<((Integer, Integer), Integer, Integer)> {
+pub fn ecvrf_decode_proof(pi: &[u8]) -> Option<((Mpz, Mpz), Mpz, Mpz)> {
     if pi.len() != 80 {
         return None;
     }
 
     let gamma = decode_point(&pi[0..32])?;
-    let c = Integer::from_digits(&pi[32..48], Order::Lsf);
-    let s = Integer::from_digits(&pi[48..], Order::Lsf);
+
+    let mut c_pi: Vec<u8> = Vec::new(); 
+    c_pi.extend(pi[32..48].iter().rev());
+    let c = Mpz::from(c_pi.as_slice());
+    
+    let mut s_pi: Vec<u8> = Vec::new(); 
+    s_pi.extend(pi[48..].iter().rev());
+    let s = Mpz::from(s_pi.as_slice());
 
     Some((gamma, c, s))
 }
@@ -172,9 +179,9 @@ pub fn expand_message_xmd(msg: &[u8]) -> Option<Vec<u8>> {
     Some(hash(&[hash(&msg_prime), vec![1], dst_prime].concat()))
 }
 
-pub fn hash_to_field(msg: &[u8]) -> Option<Integer> {
+pub fn hash_to_field(msg: &[u8]) -> Option<Mpz> {
     Some(modulus(
-        &Integer::from_digits(&expand_message_xmd(msg)?[..48], Order::Msf),
+        &Mpz::from(&expand_message_xmd(msg)?[..48]),
         &*PRIME,
     ))
 }
@@ -182,29 +189,24 @@ pub fn hash_to_field(msg: &[u8]) -> Option<Integer> {
 pub fn ecvrf_hash_to_curve_elligator2_25519(y: &[u8], alpha: &[u8]) -> Option<Vec<u8>> {
     let u = hash_to_field(&[y, alpha].concat())?;
 
-    let mut tv1 = (&u * &u).complete();
-    tv1 = modulus(&(2 * tv1), &*PRIME);
-    if tv1 == Integer::from(&*PRIME - 1) {
-        tv1 = Integer::from(0);
+    let mut tv1 = &u * &u;
+    tv1 = modulus(&(&Mpz::from(2) * &tv1), &*PRIME);
+    if tv1 == Mpz::from(&*PRIME - 1) {
+        tv1 = Mpz::zero();
     }
 
-    let mut x1 = inverse(&modulus(&(tv1.clone() + 1), &*PRIME));
-    x1 = modulus(&((-&*A).complete() * x1), &*PRIME);
-    let mut gx1 = modulus(&(x1.clone() + &*A), &*PRIME);
-    gx1 = modulus(&(gx1 * x1.clone()), &*PRIME);
-    gx1 = modulus(&(gx1 + 1), &*PRIME);
-    gx1 = modulus(&(gx1 * x1.clone()), &*PRIME);
-    let x2 = modulus(&(-x1.clone() - &*A), &*PRIME);
-    let gx2 = modulus(&(tv1 * gx1.clone()), &*PRIME);
+    let mut x1 = inverse(&modulus(&(&tv1 + 1), &*PRIME));
+    x1 = modulus(&((-&*A) * x1), &*PRIME);
+    let mut gx1 = modulus(&(&x1 + &*A), &*PRIME);
+    gx1 = modulus(&(&gx1 * &x1), &*PRIME);
+    gx1 = modulus(&(&gx1 + 1), &*PRIME);
+    gx1 = modulus(&(&gx1 * &x1), &*PRIME);
+    let x2 = modulus(&(-&x1 - &*A), &*PRIME);
+    let gx2 = modulus(&(&tv1 * &gx1), &*PRIME);
 
-    let e2 = match Integer::from(
-        gx1.pow_mod_ref(&(Integer::from(&*PRIME - 1) >> 1), &*PRIME)
-            .unwrap(),
-    )
-    .to_u8()
-    {
-        Some(0) => true,
-        Some(1) => true,
+    let e2 = match gx1.powm(&(Mpz::from(&*PRIME - 1) >> 1), &*PRIME).to_string().as_str() {
+        "0" => true,
+        "1" => true,
         _ => false,
     };
 
@@ -216,20 +218,21 @@ pub fn ecvrf_hash_to_curve_elligator2_25519(y: &[u8], alpha: &[u8]) -> Option<Ve
     }
 
     let edwards_y = modulus(
-        &(Integer::from(x.clone() - 1) * inverse(&(x.clone() + 1))),
+        &(Mpz::from(&x - 1) * inverse(&(&x + 1))),
         &*PRIME,
     );
-    let mut h_prelim = decode_point(&edwards_y.to_digits::<u8>(Order::Lsf))?;
+    let edwards_y_rev: Vec<u8> = Vec::from(&edwards_y).into_iter().rev().collect();
+    let mut h_prelim = decode_point(edwards_y_rev.as_slice())?;
     let y_coordinate = modulus(
-        &((&*SQRT_MINUS_A_PLUS_2 * &x).complete() * inverse(&h_prelim.0)),
+        &((&*SQRT_MINUS_A_PLUS_2 * &x) * inverse(&h_prelim.0)),
         &*PRIME,
     );
 
-    if modulus(&(&y_coordinate * &y_coordinate).complete(), &*PRIME) != gx {
+    if modulus(&(&y_coordinate * &y_coordinate), &*PRIME) != gx {
         return None;
     }
 
-    let e3 = Integer::from(&y_coordinate & 1).to_u8().unwrap() == 1;
+    let e3 = u8::from_str_radix(&(&y_coordinate & Mpz::one()).to_string(), 10).unwrap() == 1u8;
     if e2 ^ e3 {
         h_prelim.0 = modulus(&-h_prelim.0, &*PRIME);
     }
@@ -238,11 +241,11 @@ pub fn ecvrf_hash_to_curve_elligator2_25519(y: &[u8], alpha: &[u8]) -> Option<Ve
 }
 
 pub fn ecvrf_hash_points(
-    p1: &(Integer, Integer),
-    p2: &(Integer, Integer),
-    p3: &(Integer, Integer),
-    p4: &(Integer, Integer),
-) -> Integer {
+    p1: &(Mpz, Mpz),
+    p2: &(Mpz, Mpz),
+    p3: &(Mpz, Mpz),
+    p4: &(Mpz, Mpz),
+) -> Mpz {
     let s_string = [
         &SUITE_STRING[..],
         &vec![2u8][..],
@@ -255,9 +258,10 @@ pub fn ecvrf_hash_points(
     .concat();
 
     let c_string = hash(&s_string);
-    let truncated_c_string = &c_string[0..16];
-
-    Integer::from_digits(&truncated_c_string, Order::Lsf)
+    let mut truncated_c_string: Vec<u8> = Vec::new(); 
+    truncated_c_string.extend(c_string[0..16].iter().rev());
+    
+    Mpz::from(truncated_c_string.as_slice())
 }
 
 pub fn ecvrf_verify(y: &[u8], pi: &[u8], alpha: &[u8]) -> bool {
@@ -300,14 +304,14 @@ mod tests {
 
     #[test]
     fn is_on_curve_test() {
-        assert_eq!(is_on_curve(&(Integer::from(0), Integer::from(1))), true);
+        assert_eq!(is_on_curve(&(Mpz::from(0), Mpz::from(1))), true);
         assert_eq!(
             is_on_curve(&(
                 "2467584584982761739087903239975580076073426676744013905948960903141708961180"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "4882184778386801025813782108981700325881234329435150280746293678017607916296"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )),
             true
@@ -315,10 +319,10 @@ mod tests {
         assert_eq!(
             is_on_curve(&(
                 "2467584584982761739087903239975580076073426676744013905948960903141708961180"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "4882184778386801025813782108981700325881234329435150280746293678017607916295"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )),
             false
@@ -326,10 +330,10 @@ mod tests {
         assert_eq!(
             is_on_curve(&(
                 "2467584584982761739087903239975580076073426676744013905948960903141708961181"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "4882184778386801025813782108981700325881234329435150280746293678017607916296"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )),
             false
@@ -339,23 +343,23 @@ mod tests {
     #[test]
     fn x_recover_test() {
         assert_eq!(
-            x_recover(&"1".parse::<Integer>().unwrap()),
-            "0".parse::<Integer>().unwrap()
+            x_recover(&"1".parse::<Mpz>().unwrap()),
+            "0".parse::<Mpz>().unwrap()
         );
         assert_eq!(
-            x_recover(&"1000000".parse::<Integer>().unwrap()),
+            x_recover(&"1000000".parse::<Mpz>().unwrap()),
             "42264365937216995767569786311423113212193185317045903349677162665330205787882"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
         assert_eq!(
             x_recover(
                 &"5490344842503262896049970157107921391700051501439740859138324399589050432176"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             ),
             "40693201237000043021686838142473729874979326212385650705970612165939555930168"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
     }
@@ -363,16 +367,16 @@ mod tests {
     #[test]
     fn encode_point_test() {
         assert_eq!(
-            encode_point(&(Integer::from(0), Integer::from(1))),
+            encode_point(&(Mpz::from(0), Mpz::from(1))),
             decode("0100000000000000000000000000000000000000000000000000000000000000").unwrap()
         );
         assert_eq!(
             encode_point(&(
                 "5490344842503262896049970157107921391700051501439740859138324399589050432176"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "6892623829087957149769104661949562962747386908121354426791544695725788966110"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )),
             decode("de2c8f6440ccc8b39a44cbb881a0c8ba2be8082f641e285e049c24033b163d0f").unwrap()
@@ -380,10 +384,10 @@ mod tests {
         assert_eq!(
             encode_point(&(
                 "11765910627670138205555954470128887569457785139558335884609577674421928602465"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "18209892540234382838474494422429649302902580183111935078055540371838462697257"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )),
             decode("299f6d20010556799ff82f2ad721bd15732f7533cfc6ad8bf333cd22166f42a8").unwrap()
@@ -399,8 +403,8 @@ mod tests {
             )
             .unwrap(),
             (
-                "0".parse::<Integer>().unwrap(),
-                "1".parse::<Integer>().unwrap()
+                "0".parse::<Mpz>().unwrap(),
+                "1".parse::<Mpz>().unwrap()
             )
         );
         assert_eq!(
@@ -411,10 +415,10 @@ mod tests {
             .unwrap(),
             (
                 "18738815168440011986408904409747661355966848393371742103586138146960616269896"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "5017600804117403562852659704574511322216896914205922652106168593697487589243"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )
         );
@@ -426,10 +430,10 @@ mod tests {
             .unwrap(),
             (
                 "11765910627670138205555954470128887569457785139558335884609577674421928602465"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "18209892540234382838474494422429649302902580183111935078055540371838462697257"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )
         );
@@ -446,17 +450,17 @@ mod tests {
             (
                 (
                     "27697607651988823115975462172016124959043654960543528824774351294042131512091"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "33056851164339470258906459114062521442851091569965281854821725995490451130792"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
                 "91770691117758273713681408009594385652"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap(),
                 "748732389381679406359389955750217672883708317852412390845739987821316042438"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
             )
         );
@@ -469,17 +473,17 @@ mod tests {
             (
                 (
                     "20145088686991237763563330138422416133011020304089967570913862140895427216188"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "44718429527015941074873329327942383821260886483403263181075854270961588330896"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
                 "47799234789388919003118978975460433377"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap(),
                 "6972218658068131753903599998180446075911404073082034377012199676502466150793"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
             )
         );
@@ -489,52 +493,52 @@ mod tests {
     fn ecvrf_hash_points_test() {
         assert_eq!(
             ecvrf_hash_points(
-                &(Integer::from(1), Integer::from(2)),
-                &(Integer::from(3), Integer::from(4)),
-                &(Integer::from(5), Integer::from(6)),
-                &(Integer::from(7), Integer::from(8)),
+                &(Mpz::from(1), Mpz::from(2)),
+                &(Mpz::from(3), Mpz::from(4)),
+                &(Mpz::from(5), Mpz::from(6)),
+                &(Mpz::from(7), Mpz::from(8)),
             ),
             "161209729549110407160776210096078431864"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
         assert_eq!(
             ecvrf_hash_points(
                 &(
                     "20145088686991237763563330138422416133011020304089967570913862140895427216188"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "44718429527015941074873329327942383821260886483403263181075854270961588330896"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
                 &(
                     "5313863158657921736192767953913786084044359767756713289178739762614964543209"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "50988912630131679334181337403790444623412258884662970567487510258466540553771"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
                 &(
                     "7107631960465767869535429853349295352031173980104103285621849487667722533297"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "42878079319476036336137946623896330600009697504370825498274853352471200872065"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
                 &(
                     "12156183745850511073089323218562745643254017618359848732866684019020326374996"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "28984688919812345790446526728176753506503314096611481498246417562994872970561"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
             ),
             "233782579309306465553849508530338471250"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
     }
@@ -560,13 +564,13 @@ mod tests {
         assert_eq!(
             hash_to_field(&vec![]).unwrap(),
             "19984796091926620114398603282246129530205018809106914407141744082303129033320"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
         assert_eq!(
             hash_to_field(&decode("0102040810204080ff").unwrap()).unwrap(),
             "40866905167524404221649250981304847553674991259516901614549124933108104064175"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
         assert_eq!(
@@ -576,7 +580,7 @@ mod tests {
             )
             .unwrap(),
             "42190151610809284644600066009282933920020180701265092905748556772002395560942"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
         assert_eq!(
@@ -586,7 +590,7 @@ mod tests {
             )
             .unwrap(),
             "7289615016767941863395051431412729080032480398674317575538643993554362504793"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap()
         );
     }
@@ -632,22 +636,22 @@ mod tests {
     #[test]
     fn modulus_test() {
         assert_eq!(
-            modulus(&Integer::from(-4), &Integer::from(7)),
-            Integer::from(3)
+            modulus(&Mpz::from(-4), &Mpz::from(7)),
+            Mpz::from(3)
         );
         assert_eq!(
-            modulus(&Integer::from(-11), &Integer::from(7)),
-            Integer::from(3)
+            modulus(&Mpz::from(-11), &Mpz::from(7)),
+            Mpz::from(3)
         );
     }
 
     #[test]
     fn inverse_test() {
         let a = "115792089237316195423570234324123"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
         let b = "50185070121833820750509717279311425478202465867786279873084127885179732477785"
-            .parse::<Integer>()
+            .parse::<Mpz>()
             .unwrap();
         assert_eq!(b, inverse(&a));
     }
@@ -656,27 +660,27 @@ mod tests {
     fn ecc_sqrt_test() {
         assert_eq!(
             "35634419551235720116798594689937697774970528779494777598852457192116356634056"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap(),
             x_recover(
                 &"50185070121833820750509717279311425478202465867786279873084127885179732477785"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )
         );
         assert_eq!(
             "53301587420761876222207658879710286820900298918325969647217375986994648841896"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap(),
-            x_recover(&"3185713857305035135".parse::<Integer>().unwrap())
+            x_recover(&"3185713857305035135".parse::<Mpz>().unwrap())
         );
         assert_eq!(
             "46177144718970195273346399805952030171392250782719158809116863111243864153332"
-                .parse::<Integer>()
+                .parse::<Mpz>()
                 .unwrap(),
             x_recover(
                 &"87305764600495522745247520759120714246727049616"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )
         );
@@ -686,15 +690,15 @@ mod tests {
     fn edwards_add_test() {
         assert_eq!(
             edwards_add(
-                &(Integer::from(1), Integer::from(2)),
-                &(Integer::from(3), Integer::from(4)),
+                &(Mpz::from(1), Mpz::from(2)),
+                &(Mpz::from(3), Mpz::from(4)),
             ),
             (
                 "30669472807527669052310166413469871322722837873560156671152128699509420332835"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "32803760088457211740806219601341938367891502708272204402052114923463521408048"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )
         );
@@ -702,27 +706,27 @@ mod tests {
             edwards_add(
                 &(
                     "105245200036929210524520003692921052452000369292"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "636368388952114463636838895211446363683889521144"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
                 &(
                     "365761262312465236576126231246523657612623124652"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "599638831716981459963883171698145996388317169814"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
             ),
             (
                 "16094028690776613779404630311380383789228303041060010793878272985304591730114"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "56509461539446191492739335780640787740284013129997346250692191322113562145891"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             )
         );
@@ -734,22 +738,22 @@ mod tests {
             scalar_multiply(
                 &(
                     "2504841017466682250484101746668225048410174666822504841017466682"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "1956113754237990195611375423799019561137542379901956113754237990"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap()
                 ),
                 &"7126414032541130712641403254113071264140325411307126414032541130"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             ),
             Some((
                 "3717741300534171586596133929728979624065571837388221471827653882295568582734"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "1221637037450835314506423104277906057339963056664048728491680523116867554868"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap()
             ))
         );
@@ -757,22 +761,22 @@ mod tests {
             scalar_multiply(
                 &(
                     "2504841017466682250484101746668225048410174666822504841017466682"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "1513453546461956113754237990195611375423799019561137542379901956113754237990"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                 ),
                 &"74830380039917927238342598863222899552394587271096264578218486964046080567388"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
             ),
             Some((
                 "10451491913815505047931853002078552559328154600536681248542806488509264630860"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "1891777415277742323394479244063570290330034114551949119047672059968424552778"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
             ))
         );
@@ -781,22 +785,22 @@ mod tests {
             scalar_multiply(
                 &(
                     "41580769168035012703902357280663015773275161554063216603182338549261711251193"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                     "24911656077204456209601399282188369610223880089588176348139024489849710828841"
-                        .parse::<Integer>()
+                        .parse::<Mpz>()
                         .unwrap(),
                 ),
                 &"112366451224199189657043841110239819447199235354327421131306119208159432979989"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
             ),
             Some((
                 "8072112576901302001883587473420904198649999849925609514862948818584399467310"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
                 "35299203632341130723598861202244935989969207066742744119141421954087584890438"
-                    .parse::<Integer>()
+                    .parse::<Mpz>()
                     .unwrap(),
             ))
         );
