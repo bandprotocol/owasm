@@ -1,0 +1,16 @@
+[package]
+name = "owasm-crypto"
+version = "0.1.13"
+authors = ["Band Protocol <connect@bandprotocol.com>"]
+edition = "2018"
+license = "Apache-2.0"
+repository = "https://github.com/bandprotocol/owasm/tree/master/packages/crypto"
+description = "Cryoto functions for Oracle script"
+readme = "README.md"
+
+[dependencies]
+hex = "0.4.3"
+rust-gmp = "0.5.0"
+sha2 = "0.9.5"
+sha3 = "0.9.1"
+lazy_static = "1.4.0"
