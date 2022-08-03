@@ -14,7 +14,7 @@ use pwasm_utils::{self, rules};
 
 use wasmer::{imports, wasmparser, Function, Singlepass, Store, JIT};
 
-use owasm_crypto::{ecvrf};
+use owasm_crypto::ecvrf;
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -278,7 +278,6 @@ where
                     let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
                     let pi: Vec<u8>= get_from_mem(env, pi_ptr, pi_len)?;
                     let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
-                    
                     Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
                 })
             }),
@@ -363,11 +362,11 @@ mod test {
             (import "env" "ask_external_data" (func (type 0)))
             (func
               (local $idx i32)
-              (set_local $idx (i32.const 0))
+              (local.set $idx (i32.const 0))
               (block
                   (loop
-                    (set_local $idx (get_local $idx) (i32.const 1) (i32.add) )
-                    (br_if 0 (i32.lt_u (get_local $idx) (i32.const 1000000000)))
+                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 1000000000)))
                   )
                 )
             )
@@ -480,11 +479,11 @@ mod test {
             r#"(module
             (func
               (local $idx i32)
-              (set_local $idx (i32.const 0))
+              (local.set $idx (i32.const 0))
               (block
                   (loop
-                    (set_local $idx (get_local $idx) (i32.const 1) (i32.add) )
-                    (br_if 0 (i32.lt_u (get_local $idx) (i32.const 1000000000)))
+                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 1000000000)))
                   )
                 )
             )
