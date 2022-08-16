@@ -9,10 +9,16 @@ pub use error::Error;
 use parity_wasm::builder;
 use parity_wasm::elements::{self, External, MemoryType, Module};
 pub use std::ptr::NonNull;
+use std::sync::Arc;
+use wasmer::Universal;
+use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use pwasm_utils::{self, rules};
 
-use wasmer::{imports, wasmparser, Function, Singlepass, Store, JIT};
+use wasmer::{
+    imports, wasmparser, wasmparser::Operator, CompilerConfig, Function, Singlepass, Store, JIT,
+};
+use wasmer_middlewares::Metering;
 
 use owasm_crypto::ecvrf;
 
@@ -141,6 +147,11 @@ fn get_from_mem<E: vm::Env>(env: &Environment<E>, ptr: i64, len: i64) -> Result<
     Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
 }
 
+fn cost(_operator: &Operator) -> u64 {
+    // A flat fee for each operation
+    1
+}
+
 pub fn run<E>(
     cache: &mut Cache,
     code: &[u8],
@@ -153,8 +164,11 @@ where
 {
     let owasm_env = Environment::new(env, gas);
 
-    let compiler = Singlepass::new();
-    let store = Store::new(&JIT::new(compiler).engine());
+    let mut compiler = Singlepass::default();
+    let metering = Arc::new(Metering::new(4294967290, cost));
+    compiler.push_middleware(metering);
+    let engine = Universal::new(compiler).engine();
+    let store = Store::new(&engine);
 
     let import_object = imports! {
         "env" => {
@@ -302,26 +316,67 @@ where
             return err.clone();
         }
 
-        owasm_env.with_vm(|vm| {
-            if vm.out_of_gas() {
-                return Error::OutOfGasError;
-            }
-
-            Error::RuntimeError
-        })
+        match get_remaining_points(&instance) {
+            MeteringPoints::Remaining(_) => Error::RuntimeError,
+            MeteringPoints::Exhausted => Error::OutOfGasError,
+        }
     })?;
 
-    Ok(owasm_env.with_vm(|vm| vm.gas_used))
+    match get_remaining_points(&instance) {
+        MeteringPoints::Remaining(count) => return Ok(gas - (count as u32)),
+        MeteringPoints::Exhausted => return Ok(gas),
+    };
+    // Ok(owasm_env.with_vm(|vm| vm.gas_used))
 }
 
 #[cfg(test)]
 mod test {
+    use crate::cache::CacheOptions;
+
     use super::*;
     use assert_matches::assert_matches;
     use parity_wasm::elements;
     use std::io::{Read, Write};
     use std::process::Command;
     use tempfile::NamedTempFile;
+
+    pub struct MockEnv {}
+
+    impl vm::Env for MockEnv {
+        fn get_span_size(&self) -> i64 {
+            100_000
+        }
+        fn get_calldata(&self) -> Result<Vec<u8>, Error> {
+            Ok(vec![1])
+        }
+        fn set_return_data(&self, _: &[u8]) -> Result<(), Error> {
+            Ok(())
+        }
+        fn get_ask_count(&self) -> i64 {
+            10
+        }
+        fn get_min_count(&self) -> i64 {
+            8
+        }
+        fn get_prepare_time(&self) -> i64 {
+            100_000
+        }
+        fn get_execute_time(&self) -> Result<i64, Error> {
+            Ok(100_000)
+        }
+        fn get_ans_count(&self) -> Result<i64, Error> {
+            Ok(8)
+        }
+        fn ask_external_data(&self, _: i64, _: i64, _: &[u8]) -> Result<(), Error> {
+            Ok(())
+        }
+        fn get_external_data_status(&self, _: i64, _: i64) -> Result<i64, Error> {
+            Ok(1)
+        }
+        fn get_external_data(&self, _: i64, _: i64) -> Result<Vec<u8>, Error> {
+            Ok(vec![1])
+        }
+    }
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
         let mut input_file = NamedTempFile::new().unwrap();
@@ -430,6 +485,36 @@ mod test {
                 (data (;0;) (i32.const 1048576) "beeb"))"#,
         );
         assert_eq!(code, expected);
+    }
+
+    #[test]
+    fn test_gas_used() {
+        let wasm = wat2wasm(
+            r#"(module
+            (type (func (param i64 i64 i64 i64) (result)))
+            (func
+              (local $idx i32)
+              (local.set $idx (i32.const 0))
+              (block
+                  (loop
+                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 100000)))
+                  )
+                )
+            )
+            (func (;"execute": Resolves with result "beeb";)
+            )
+            (memory 17)
+            (data (i32.const 1048576) "beeb") (;str = "beeb";)
+            (export "prepare" (func 0))
+            (export "execute" (func 1)))
+          "#,
+        );
+        let code = compile(&wasm).unwrap();
+        let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
+        let env = MockEnv {};
+        let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
+        assert_eq!(gas_used, 1000015 as u32);
     }
 
     #[test]
