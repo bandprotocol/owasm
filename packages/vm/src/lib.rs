@@ -15,10 +15,6 @@ use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 use pwasm_utils::{self, rules};
 
-#[cfg(feature = "cranelift")]
-use wasmer::Cranelift;
-
-#[cfg(not(feature = "cranelift"))]
 use wasmer::Singlepass;
 
 use wasmer::{imports, wasmparser, wasmparser::Operator, CompilerConfig, Function, Store, JIT};
@@ -183,10 +179,6 @@ where
 {
     let owasm_env = Environment::new(env, gas);
 
-    #[cfg(feature = "cranelift")]
-    let mut compiler = Cranelift::default();
-
-    #[cfg(not(feature = "cranelift"))]
     let mut compiler = Singlepass::default();
 
     let metering = Arc::new(Metering::new(4294967290, cost));
