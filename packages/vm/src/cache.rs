@@ -89,7 +89,7 @@ mod test {
     use std::io::{Read, Write};
     use std::process::Command;
     use tempfile::NamedTempFile;
-    use wasmer::{imports, Singlepass, Store, JIT};
+    use wasmer::{imports, Singlepass, Store, Universal};
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
         let mut input_file = NamedTempFile::new().unwrap();
@@ -110,7 +110,7 @@ mod test {
 
     fn get_instance_without_err(cache: &mut Cache, wasm: &[u8]) -> wasmer::Instance {
         let compiler = Singlepass::new();
-        let store = Store::new(&JIT::new(compiler).engine());
+        let store = Store::new(&Universal::new(compiler).engine());
         let import_object = imports! {};
 
         match cache.get_instance(&wasm, &store, &import_object) {

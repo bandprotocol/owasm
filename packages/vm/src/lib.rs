@@ -17,7 +17,7 @@ use pwasm_utils::{self, rules};
 
 use wasmer::Singlepass;
 
-use wasmer::{imports, wasmparser, wasmparser::Operator, CompilerConfig, Function, Store, JIT};
+use wasmer::{imports, wasmparser, wasmparser::Operator, CompilerConfig, Function, Store};
 use wasmer_middlewares::Metering;
 
 use owasm_crypto::ecvrf;
@@ -179,7 +179,7 @@ where
 {
     let owasm_env = Environment::new(env, gas);
 
-    let mut compiler = Singlepass::default();
+    let mut compiler = Singlepass::new();
 
     let metering = Arc::new(Metering::new(4294967290, cost));
     compiler.push_middleware(metering);
