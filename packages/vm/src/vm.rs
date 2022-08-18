@@ -1,8 +1,11 @@
 use crate::error::Error;
+use std::borrow::Borrow;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, RwLock};
 
+use cosmwasm_vm::{VmError, VmResult};
 use wasmer::{Instance, Memory, WasmerEnv};
+use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
 pub trait Env {
     /// Returns the maximum span size value.
@@ -120,6 +123,56 @@ where
     pub fn set_wasmer_instance(&self, instance: Option<NonNull<Instance>>) {
         let mut data = self.data.as_ref().write().unwrap();
         data.wasmer_instance = instance;
+    }
+
+    pub fn with_wasmer_instance<C, R>(&self, callback: C) -> VmResult<R>
+    where
+        C: FnOnce(&Instance) -> VmResult<R>,
+    {
+        self.with_context_data(|context_data| match context_data.wasmer_instance {
+            Some(instance_ptr) => {
+                let instance_ref = unsafe { instance_ptr.as_ref() };
+                callback(instance_ref)
+            }
+            None => Err(VmError::UninitializedContextData { kind: "wasmer_instance".to_string() }),
+        })
+    }
+
+    fn with_context_data<C, R>(&self, callback: C) -> R
+    where
+        C: FnOnce(&ContextData) -> R,
+    {
+        let guard = self.data.as_ref().read().unwrap();
+        let context_data = guard.borrow();
+        callback(context_data)
+    }
+
+    pub fn get_gas_left(&self) -> u64 {
+        self.with_wasmer_instance(|instance| {
+            Ok(match get_remaining_points(instance) {
+                MeteringPoints::Remaining(count) => count,
+                MeteringPoints::Exhausted => 0,
+            })
+        })
+        .expect("Wasmer instance is not set. This is a bug in the lifecycle.")
+    }
+
+    pub fn set_gas_left(&self, new_value: u64) {
+        self.with_wasmer_instance(|instance| {
+            set_remaining_points(instance, new_value);
+            Ok(())
+        })
+        .expect("Wasmer instance is not set. This is a bug in the lifecycle.")
+    }
+
+    pub fn decrease_gas_left(&self, gas_used: u32) -> Result<(), Error> {
+        let gas_left = self.get_gas_left();
+        if gas_used as u64 > gas_left {
+            Err(Error::OutOfGasError)
+        } else {
+            self.set_gas_left(gas_left.saturating_sub(gas_used.into()));
+            Ok(())
+        }
     }
 
     pub fn memory(&self) -> Result<Memory, Error> {

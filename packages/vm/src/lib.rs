@@ -189,9 +189,9 @@ where
     let import_object = imports! {
         "env" => {
             "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, gas: u32| {
-                // env.with_mut_vm(|vm| {
-                //     vm.consume_gas(gas)
-                // })
+                env.with_mut_vm(|vm| {
+                    vm.consume_gas(gas)
+                })
             }),
             "get_span_size" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
                 env.with_vm(|vm| {
@@ -203,6 +203,7 @@ where
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read calldata
                     vm.consume_gas(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -226,6 +227,7 @@ where
 
                     // consume gas equal size of span when save data to memory
                     vm.consume_gas(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -269,6 +271,7 @@ where
 
                     // consume gas equal size of span when write calldata for raw request
                     vm.consume_gas(span_size  as u32)?;
+                    env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -287,6 +290,7 @@ where
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read data from report
                     vm.consume_gas(span_size  as u32)?;
+                    env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -304,6 +308,7 @@ where
                 env.with_mut_vm(|vm| -> Result<u32, Error>{
                     // consume gas relatively to the function running time (~12ms)
                     vm.consume_gas(500000)?;
+                    env.decrease_gas_left(500000)?;
 
                     let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
                     let pi: Vec<u8>= get_from_mem(env, pi_ptr, pi_len)?;
@@ -361,7 +366,7 @@ mod test {
 
     impl vm::Env for MockEnv {
         fn get_span_size(&self) -> i64 {
-            100_000
+            30000
         }
         fn get_calldata(&self) -> Result<Vec<u8>, Error> {
             Ok(vec![1])
@@ -505,7 +510,7 @@ mod test {
     }
 
     #[test]
-    fn test_gas_used() {
+    fn test_simple_gas_used() {
         let wasm = wat2wasm(
             r#"(module
             (type (func (param i64 i64 i64 i64) (result)))
@@ -533,6 +538,42 @@ mod test {
         let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
         assert_eq!(gas_used, 1000015 as u32);
     }
+
+    // #[test]
+    // fn test_ask_count_gas_used() {
+    //     let wasm = wat2wasm(
+    //         r#"(module
+    //             (type (func (param i64 i64 i64 i64)))
+    //             (import "env" "ask_external_data" (func $ask_external_data (type 0)))
+    //             (func
+    //                 (local $idx i32)
+    //                 (i64.const 1)
+    //                 (i64.const 1)
+    //                 (i64.const 1048576)
+    //                 (i64.const 4)
+    //                 call 0
+    //               (local.set $idx (i32.const 0))
+    //               (block
+    //                   (loop
+    //                     (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+    //                     (br_if 0 (i32.lt_u (local.get $idx) (i32.const 100000)))
+    //                   )
+    //                 )
+    //             )
+    //             (func (;"execute": Resolves with result "beeb";)
+    //             )
+    //             (memory 17)
+    //             (data (i32.const 1048576) "beeb") (;str = "beeb";)
+    //             (export "prepare" (func 1))
+    //             (export "execute" (func 2)))
+    //       "#,
+    //     );
+    //     let code = compile(&wasm).unwrap();
+    //     let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
+    //     let env = MockEnv {};
+    //     let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
+    //     assert_eq!(gas_used, 1000015 as u32);
+    // }
 
     #[test]
     fn test_run_time() {
@@ -571,8 +612,7 @@ mod test {
         let now = Instant::now();
         let _gas_used = run(&mut cache, &new_code, 4294967290, true, env).unwrap();
         let elapsed_time_2 = now.elapsed();
-
-        assert_eq!(elapsed_time.as_micros(), elapsed_time_2.as_micros());
+        assert_eq!(true, elapsed_time.as_micros() > elapsed_time_2.as_micros());
     }
 
     #[test]
