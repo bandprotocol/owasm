@@ -248,7 +248,6 @@ where
                     }
 
                     // consume gas equal size of span when write calldata for raw request
-                    // vm.consume_gas(span_size  as u32)?;
                     env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
