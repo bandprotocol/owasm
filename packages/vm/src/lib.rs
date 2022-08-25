@@ -301,13 +301,6 @@ where
     owasm_env.set_wasmer_instance(Some(instance_ptr));
     owasm_env.set_gas_left(gas);
 
-    match get_remaining_points(&instance) {
-        MeteringPoints::Remaining(count) => {
-            println!("gas {:?}, count {:?}, gas_used {:?}", gas, count, gas.saturating_sub(count));
-        }
-        MeteringPoints::Exhausted => {}
-    }
-
     // get function and exec
     let entry = if is_prepare { "prepare" } else { "execute" };
     let function = instance
@@ -329,10 +322,7 @@ where
     })?;
 
     match get_remaining_points(&instance) {
-        MeteringPoints::Remaining(count) => {
-            println!("gas {:?}, count {:?}, gas_used {:?}", gas, count, gas.saturating_sub(count));
-            Ok(gas.saturating_sub(count))
-        }
+        MeteringPoints::Remaining(count) => Ok(gas.saturating_sub(count)),
         MeteringPoints::Exhausted => Err(Error::OutOfGasError),
     }
 }
