@@ -20,7 +20,7 @@ use wasmer::Singlepass;
 use wasmer::{imports, wasmparser, wasmparser::Operator, CompilerConfig, Function, Store};
 use wasmer_middlewares::Metering;
 
-use owasm_crypto::ecvrf;
+// use owasm_crypto::ecvrf;
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -156,11 +156,11 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
     Ok(())
 }
 
-fn get_from_mem<E: vm::Env>(env: &Environment<E>, ptr: i64, len: i64) -> Result<Vec<u8>, Error> {
-    let memory = env.memory()?;
-    require_mem_range(memory.size().bytes().0, (ptr + len) as usize)?;
-    Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
-}
+// fn get_from_mem<E: vm::Env>(env: &Environment<E>, ptr: i64, len: i64) -> Result<Vec<u8>, Error> {
+//     let memory = env.memory()?;
+//     require_mem_range(memory.size().bytes().0, (ptr + len) as usize)?;
+//     Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
+// }
 
 fn cost(_operator: &Operator) -> u64 {
     // A flat fee for each operation
@@ -170,18 +170,17 @@ fn cost(_operator: &Operator) -> u64 {
 pub fn run<E>(
     cache: &mut Cache,
     code: &[u8],
-    gas: u32,
+    gas: u64,
     is_prepare: bool,
     env: E,
-) -> Result<u32, Error>
+) -> Result<u64, Error>
 where
     E: vm::Env + 'static,
 {
     let owasm_env = Environment::new(env, gas);
 
     let mut compiler = Singlepass::new();
-
-    let metering = Arc::new(Metering::new(4294967290, cost));
+    let metering = Arc::new(Metering::new(0, cost));
     compiler.push_middleware(metering);
     let engine = Universal::new(compiler).engine();
     let store = Store::new(&engine);
@@ -270,8 +269,8 @@ where
                     }
 
                     // consume gas equal size of span when write calldata for raw request
-                    vm.consume_gas(span_size  as u32)?;
-                    env.decrease_gas_left(span_size as u32)?;
+                    // vm.consume_gas(span_size  as u32)?;
+                    // env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -304,24 +303,32 @@ where
                     Ok(data.len() as i64)
                 })
             }),
-            "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, y_ptr: i64, y_len: i64, pi_ptr: i64, pi_len: i64, alpha_ptr: i64, alpha_len: i64| {
-                env.with_mut_vm(|vm| -> Result<u32, Error>{
-                    // consume gas relatively to the function running time (~12ms)
-                    vm.consume_gas(500000)?;
-                    env.decrease_gas_left(500000)?;
+            // "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, y_ptr: i64, y_len: i64, pi_ptr: i64, pi_len: i64, alpha_ptr: i64, alpha_len: i64| {
+            //     env.with_mut_vm(|vm| -> Result<u32, Error>{
+            //         // consume gas relatively to the function running time (~12ms)
+            //         vm.consume_gas(500000)?;
+            //         env.decrease_gas_left(500000)?;
 
-                    let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
-                    let pi: Vec<u8>= get_from_mem(env, pi_ptr, pi_len)?;
-                    let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
-                    Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
-                })
-            }),
+            //         let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
+            //         let pi: Vec<u8>= get_from_mem(env, pi_ptr, pi_len)?;
+            //         let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
+            //         Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
+            //     })
+            // }),
         },
     };
 
     let instance = cache.get_instance(code, &store, &import_object)?;
     let instance_ptr = NonNull::from(&instance);
     owasm_env.set_wasmer_instance(Some(instance_ptr));
+    owasm_env.set_gas_left(gas);
+
+    match get_remaining_points(&instance) {
+        MeteringPoints::Remaining(count) => {
+            println!("gas {:?}, count {:?}, gas_used {:?}", gas, count, gas.saturating_sub(count));
+        }
+        MeteringPoints::Exhausted => {}
+    }
 
     // get function and exec
     let entry = if is_prepare { "prepare" } else { "execute" };
@@ -344,10 +351,12 @@ where
     })?;
 
     match get_remaining_points(&instance) {
-        MeteringPoints::Remaining(count) => return Ok(gas - (count as u32)),
-        MeteringPoints::Exhausted => return Ok(gas),
-    };
-    // Ok(owasm_env.with_vm(|vm| vm.gas_used))
+        MeteringPoints::Remaining(count) => {
+            println!("gas {:?}, count {:?}, gas_used {:?}", gas, count, gas.saturating_sub(count));
+            Ok(gas.saturating_sub(count))
+        }
+        MeteringPoints::Exhausted => Err(Error::OutOfGasError),
+    }
 }
 
 #[cfg(test)]
@@ -536,7 +545,7 @@ mod test {
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let env = MockEnv {};
         let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
-        assert_eq!(gas_used, 1000015 as u32);
+        assert_eq!(gas_used, 1000015 as u64);
     }
 
     // #[test]
