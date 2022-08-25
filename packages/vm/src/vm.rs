@@ -37,9 +37,7 @@ pub struct VMLogic<E>
 where
     E: Env,
 {
-    pub env: E,         // The execution environment.
-    pub gas_limit: u64, // Amount of gas allowed for total execution.
-    pub gas_used: u64,  // Amount of gas used in this execution.
+    pub env: E, // The execution environment.
 }
 
 impl<E> VMLogic<E>
@@ -47,22 +45,8 @@ where
     E: Env,
 {
     /// Creates a new `VMLogic` instance.
-    pub fn new(env: E, gas: u64) -> Self {
-        Self { env: env, gas_limit: gas, gas_used: 0 }
-    }
-
-    /// Consumes the given amount of gas. Return `OutOfGasError` error if run out of gas.
-    pub fn consume_gas(&mut self, gas: u32) -> Result<(), Error> {
-        self.gas_used = self.gas_used.saturating_add(gas as u64);
-        if self.out_of_gas() {
-            Err(Error::OutOfGasError)
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn out_of_gas(&self) -> bool {
-        self.gas_used > self.gas_limit
+    pub fn new(env: E) -> Self {
+        Self { env: env }
     }
 }
 
@@ -98,9 +82,9 @@ impl<E> Environment<E>
 where
     E: Env + 'static,
 {
-    pub fn new(e: E, gas: u64) -> Self {
+    pub fn new(e: E) -> Self {
         Self {
-            vm: Arc::new(Mutex::new(VMLogic::<E>::new(e, gas))),
+            vm: Arc::new(Mutex::new(VMLogic::<E>::new(e))),
             data: Arc::new(RwLock::new(ContextData::new())),
         }
     }

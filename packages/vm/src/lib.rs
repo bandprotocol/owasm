@@ -13,7 +13,7 @@ use std::sync::Arc;
 use wasmer::Universal;
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
-use pwasm_utils::{self, rules};
+use pwasm_utils::{self};
 
 use wasmer::Singlepass;
 
@@ -79,11 +79,11 @@ fn inject_stack_height(module: Module) -> Result<Module, Error> {
         .map_err(|_| Error::StackHeightInjectionError)
 }
 
-fn inject_gas(module: Module) -> Result<Module, Error> {
-    // Simple gas rule. Every opcode and memory growth costs 1 gas.
-    let gas_rules = rules::Set::new(1, Default::default()).with_grow_cost(1);
-    pwasm_utils::inject_gas_counter(module, &gas_rules).map_err(|_| Error::GasCounterInjectionError)
-}
+// fn inject_gas(module: Module) -> Result<Module, Error> {
+//     // Simple gas rule. Every opcode and memory growth costs 1 gas.
+//     let gas_rules = rules::Set::new(1, Default::default()).with_grow_cost(1);
+//     pwasm_utils::inject_gas_counter(module, &gas_rules).map_err(|_| Error::GasCounterInjectionError)
+// }
 
 fn check_wasm_exports(module: &Module) -> Result<(), Error> {
     let available_exports: Vec<&str> = module.export_section().map_or(vec![], |export_section| {
@@ -127,22 +127,6 @@ pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
     check_wasm_exports(&module)?;
     check_wasm_imports(&module)?;
     let module = inject_memory(module)?;
-    let module = inject_gas(module)?;
-    let module = inject_stack_height(module)?;
-
-    // Serialize the final Wasm code back to bytes.
-    elements::serialize(module).map_err(|_| Error::SerializationError)
-}
-
-pub fn new_compile(code: &[u8]) -> Result<Vec<u8>, Error> {
-    // Check that the given Wasm code is indeed a valid Wasm.
-    wasmparser::validate(code).map_err(|_| Error::ValidationError)?;
-
-    // Start the compiling chains.
-    let module = elements::deserialize_buffer(code).map_err(|_| Error::DeserializationError)?;
-    check_wasm_exports(&module)?;
-    check_wasm_imports(&module)?;
-    let module = inject_memory(module)?;
     let module = inject_stack_height(module)?;
 
     // Serialize the final Wasm code back to bytes.
@@ -177,7 +161,7 @@ pub fn run<E>(
 where
     E: vm::Env + 'static,
 {
-    let owasm_env = Environment::new(env, gas);
+    let owasm_env = Environment::new(env);
 
     let mut compiler = Singlepass::new();
     let metering = Arc::new(Metering::new(0, cost));
@@ -187,10 +171,7 @@ where
 
     let import_object = imports! {
         "env" => {
-            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, gas: u32| {
-                env.with_mut_vm(|vm| {
-                    vm.consume_gas(gas)
-                })
+            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |_env: &Environment<E>, _gas: u32| {
             }),
             "get_span_size" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
                 env.with_vm(|vm| {
@@ -201,7 +182,6 @@ where
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read calldata
-                    vm.consume_gas(span_size as u32)?;
                     env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
@@ -225,7 +205,6 @@ where
                     }
 
                     // consume gas equal size of span when save data to memory
-                    vm.consume_gas(span_size as u32)?;
                     env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
@@ -288,7 +267,6 @@ where
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read data from report
-                    vm.consume_gas(span_size  as u32)?;
                     env.decrease_gas_left(span_size as u32)?;
 
                     let memory = env.memory()?;
@@ -368,7 +346,6 @@ mod test {
     use parity_wasm::elements;
     use std::io::{Read, Write};
     use std::process::Command;
-    use std::time::Instant;
     use tempfile::NamedTempFile;
 
     pub struct MockEnv {}
@@ -469,19 +446,13 @@ mod test {
             r#"(module
                 (type (;0;) (func (param i64 i64 i32 i64) (result i64)))
                 (type (;1;) (func))
-                (type (;2;) (func (param i32)))
                 (import "env" "ask_external_data" (func (;0;) (type 0)))
-                (import "env" "gas" (func (;1;) (type 2)))
-                (func (;2;) (type 1)
+                (func (;1;) (type 1)
                   (local i32)
-                  i32.const 4
-                  call 1
                   i32.const 0
                   local.set 0
                   block  ;; label = @1
                     loop  ;; label = @2
-                      i32.const 8
-                      call 1
                       local.get 0
                       i32.const 1
                       i32.add
@@ -492,8 +463,8 @@ mod test {
                       br_if 0 (;@2;)
                     end
                   end)
-                (func (;3;) (type 1))
-                (func (;4;) (type 1)
+                (func (;2;) (type 1))
+                (func (;3;) (type 1)
                   global.get 0
                   i32.const 3
                   i32.add
@@ -504,7 +475,7 @@ mod test {
                   if  ;; label = @1
                     unreachable
                   end
-                  call 2
+                  call 1
                   global.get 0
                   i32.const 3
                   i32.sub
@@ -512,7 +483,7 @@ mod test {
                 (memory (;0;) 17 512)
                 (global (;0;) (mut i32) (i32.const 0))
                 (export "prepare" (func 0))
-                (export "execute" (func 4))
+                (export "execute" (func 3))
                 (data (;0;) (i32.const 1048576) "beeb"))"#,
         );
         assert_eq!(code, expected);
@@ -545,7 +516,7 @@ mod test {
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let env = MockEnv {};
         let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
-        assert_eq!(gas_used, 1000015 as u64);
+        assert_eq!(gas_used, 800013 as u64);
     }
 
     // #[test]
@@ -583,46 +554,6 @@ mod test {
     //     let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
     //     assert_eq!(gas_used, 1000015 as u32);
     // }
-
-    #[test]
-    fn test_run_time() {
-        let wasm = wat2wasm(
-            r#"(module
-            (type (func (param i64 i64 i64 i64) (result)))
-            (func
-              (local $idx i32)
-              (local.set $idx (i32.const 0))
-              (block
-                  (loop
-                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
-                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 1000000)))
-                  )
-                )
-            )
-            (func (;"execute": Resolves with result "beeb";)
-            )
-            (memory 17)
-            (data (i32.const 1048576) "beeb") (;str = "beeb";)
-            (export "prepare" (func 0))
-            (export "execute" (func 1)))
-          "#,
-        );
-        let code = compile(&wasm).unwrap();
-        let new_code = new_compile(&wasm).unwrap();
-        let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let env = MockEnv {};
-
-        let now = Instant::now();
-        let _gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
-        let elapsed_time = now.elapsed();
-
-        let env = MockEnv {};
-
-        let now = Instant::now();
-        let _gas_used = run(&mut cache, &new_code, 4294967290, true, env).unwrap();
-        let elapsed_time_2 = now.elapsed();
-        assert_eq!(true, elapsed_time.as_micros() > elapsed_time_2.as_micros());
-    }
 
     #[test]
     fn test_inject_memory_no_memory() {
