@@ -79,12 +79,6 @@ fn inject_stack_height(module: Module) -> Result<Module, Error> {
         .map_err(|_| Error::StackHeightInjectionError)
 }
 
-// fn inject_gas(module: Module) -> Result<Module, Error> {
-//     // Simple gas rule. Every opcode and memory growth costs 1 gas.
-//     let gas_rules = rules::Set::new(1, Default::default()).with_grow_cost(1);
-//     pwasm_utils::inject_gas_counter(module, &gas_rules).map_err(|_| Error::GasCounterInjectionError)
-// }
-
 fn check_wasm_exports(module: &Module) -> Result<(), Error> {
     let available_exports: Vec<&str> = module.export_section().map_or(vec![], |export_section| {
         export_section.entries().iter().map(|entry| entry.field()).collect()
@@ -171,7 +165,8 @@ where
 
     let import_object = imports! {
         "env" => {
-            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |_env: &Environment<E>, _gas: u32| {
+            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, _gas: u32| {
+                env.decrease_gas_left(1)
             }),
             "get_span_size" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
                 env.with_vm(|vm| {
@@ -182,7 +177,7 @@ where
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read calldata
-                    env.decrease_gas_left(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -205,7 +200,7 @@ where
                     }
 
                     // consume gas equal size of span when save data to memory
-                    env.decrease_gas_left(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -248,7 +243,7 @@ where
                     }
 
                     // consume gas equal size of span when write calldata for raw request
-                    env.decrease_gas_left(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -266,7 +261,7 @@ where
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read data from report
-                    env.decrease_gas_left(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
