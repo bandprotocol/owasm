@@ -503,41 +503,43 @@ mod test {
         assert_eq!(gas_used, 800013 as u64);
     }
 
-    // #[test]
-    // fn test_ask_count_gas_used() {
-    //     let wasm = wat2wasm(
-    //         r#"(module
-    //             (type (func (param i64 i64 i64 i64)))
-    //             (import "env" "ask_external_data" (func $ask_external_data (type 0)))
-    //             (func
-    //                 (local $idx i32)
-    //                 (i64.const 1)
-    //                 (i64.const 1)
-    //                 (i64.const 1048576)
-    //                 (i64.const 4)
-    //                 call 0
-    //               (local.set $idx (i32.const 0))
-    //               (block
-    //                   (loop
-    //                     (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
-    //                     (br_if 0 (i32.lt_u (local.get $idx) (i32.const 100000)))
-    //                   )
-    //                 )
-    //             )
-    //             (func (;"execute": Resolves with result "beeb";)
-    //             )
-    //             (memory 17)
-    //             (data (i32.const 1048576) "beeb") (;str = "beeb";)
-    //             (export "prepare" (func 1))
-    //             (export "execute" (func 2)))
-    //       "#,
-    //     );
-    //     let code = compile(&wasm).unwrap();
-    //     let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-    //     let env = MockEnv {};
-    //     let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
-    //     assert_eq!(gas_used, 1000015 as u32);
-    // }
+    #[test]
+    fn test_ask_count_gas_used() {
+        let wasm = wat2wasm(
+            r#"(module
+                (type (func (param i64 i64 i64 i64) (result)))
+                (import "env" "ask_external_data" (func (type 0)))
+                (func
+                    (local $idx i32)
+
+                    (i64.const 1)
+                    (i64.const 1)
+                    (i64.const 1048576)
+                    (i64.const 4)                  
+                    call 0
+
+                    (local.set $idx (i32.const 0))
+                    (block
+                        (loop
+                            (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                            (br_if 0 (i32.lt_u (local.get $idx) (i32.const 100000)))
+                        )
+                    )
+                )
+                (func (;"execute": Resolves with result "beeb";))
+                (memory (export "memory") 17)
+                (data (i32.const 1048576) "beeb")              
+                (export "prepare" (func 1))
+                (export "execute" (func 2)))
+            "#,
+        );
+
+        let code = compile(&wasm).unwrap();
+        let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
+        let env = MockEnv {};
+        let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
+        assert_eq!(gas_used, 830018 as u64);
+    }
 
     #[test]
     fn test_inject_memory_no_memory() {
