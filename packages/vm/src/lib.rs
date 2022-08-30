@@ -6,14 +6,15 @@ use cache::Cache;
 use vm::Environment;
 
 pub use error::Error;
-use parity_wasm::builder;
-use parity_wasm::elements::{self, External, MemoryType, Module};
 pub use std::ptr::NonNull;
 use std::sync::Arc;
+use wasm_instrument::parity_wasm::builder;
+use wasm_instrument::parity_wasm::elements::{self, External, MemoryType, Module};
 use wasmer::Universal;
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
-use pwasm_utils::{self};
+// use pwasm_utils::{self};
+use wasm_instrument::{self};
 
 use wasmer::Singlepass;
 
@@ -75,7 +76,9 @@ fn inject_memory(module: Module) -> Result<Module, Error> {
 }
 
 fn inject_stack_height(module: Module) -> Result<Module, Error> {
-    pwasm_utils::stack_height::inject_limiter(module, MAX_STACK_HEIGHT)
+    // pwasm_utils::stack_height::inject_limiter(module, MAX_STACK_HEIGHT)
+    //     .map_err(|_| Error::StackHeightInjectionError)
+    wasm_instrument::inject_stack_limiter(module, MAX_STACK_HEIGHT)
         .map_err(|_| Error::StackHeightInjectionError)
 }
 
@@ -327,10 +330,10 @@ mod test {
 
     use super::*;
     use assert_matches::assert_matches;
-    use parity_wasm::elements;
     use std::io::{Read, Write};
     use std::process::Command;
     use tempfile::NamedTempFile;
+    use wasm_instrument::parity_wasm::elements;
 
     pub struct MockEnv {}
 
@@ -405,7 +408,7 @@ mod test {
     fn test_compile() {
         let wasm = wat2wasm(
             r#"(module
-            (type (func (param i64 i64 i32 i64) (result i64)))
+            (type (func (param i64 i64 i64 i64) (result i64)))
             (import "env" "ask_external_data" (func (type 0)))
             (func
               (local $idx i32)
@@ -428,7 +431,7 @@ mod test {
         let code = compile(&wasm).unwrap();
         let expected = wat2wasm(
             r#"(module
-                (type (;0;) (func (param i64 i64 i32 i64) (result i64)))
+                (type (;0;) (func (param i64 i64 i64 i64) (result i64)))
                 (type (;1;) (func))
                 (import "env" "ask_external_data" (func (;0;) (type 0)))
                 (func (;1;) (type 1)
@@ -450,7 +453,7 @@ mod test {
                 (func (;2;) (type 1))
                 (func (;3;) (type 1)
                   global.get 0
-                  i32.const 3
+                  i32.const 5
                   i32.add
                   global.set 0
                   global.get 0
@@ -461,7 +464,7 @@ mod test {
                   end
                   call 1
                   global.get 0
-                  i32.const 3
+                  i32.const 5
                   i32.sub
                   global.set 0)
                 (memory (;0;) 17 512)
@@ -489,7 +492,7 @@ mod test {
                 )
             )
             (func (;"execute": Resolves with result "beeb";)
-            )
+              )
             (memory 17)
             (data (i32.const 1048576) "beeb") (;str = "beeb";)
             (export "prepare" (func 0))
@@ -628,7 +631,7 @@ mod test {
                 (func (;1;) (type 0))
                 (func (;2;) (type 0)
                   global.get 0
-                  i32.const 3
+                  i32.const 5
                   i32.add
                   global.set 0
                   global.get 0
@@ -639,13 +642,29 @@ mod test {
                   end
                   call 0
                   global.get 0
-                  i32.const 3
+                  i32.const 5
+                  i32.sub
+                  global.set 0)
+                (func (;3;) (type 0)
+                  global.get 0
+                  i32.const 2
+                  i32.add
+                  global.set 0
+                  global.get 0
+                  i32.const 16384
+                  i32.gt_u
+                  if  ;; label = @1
+                    unreachable
+                  end
+                  call 1
+                  global.get 0
+                  i32.const 2
                   i32.sub
                   global.set 0)
                 (memory (;0;) 17)
                 (global (;0;) (mut i32) (i32.const 0))
                 (export "prepare" (func 2))
-                (export "execute" (func 1))
+                (export "execute" (func 3))
                 (data (;0;) (i32.const 1048576) "beeb"))"#,
         );
         assert_eq!(wasm, expected);
