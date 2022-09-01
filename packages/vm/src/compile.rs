@@ -287,14 +287,14 @@ mod test {
     fn test_check_wasm_imports() {
         let wasm = wat2wasm(
             r#"(module
-                (type (func (param i64 i64 i32 i64) (result i64)))
+                (type (func (param i64 i64 i64 i64) (result i64)))
                 (import "env" "beeb" (func (type 0))))"#,
         );
         let module = get_module_from_wasm(&wasm);
         assert_eq!(check_wasm_imports(&module), Err(Error::InvalidImportsError));
         let wasm = wat2wasm(
             r#"(module
-                (type (func (param i64 i64 i32 i64) (result i64)))
+                (type (func (param i64 i64 i64 i64) (result i64)))
                 (import "env" "ask_external_data" (func  (type 0))))"#,
         );
         let module = get_module_from_wasm(&wasm);
@@ -306,6 +306,12 @@ mod test {
         let wasm = wat2wasm(
             r#"(module
             (func $execute (export "execute")))"#,
+        );
+        let module = get_module_from_wasm(&wasm);
+        assert_eq!(check_wasm_exports(&module), Err(Error::InvalidExportsError));
+        let wasm = wat2wasm(
+            r#"(module
+                (func $prepare (export "prepare")))"#,
         );
         let module = get_module_from_wasm(&wasm);
         assert_eq!(check_wasm_exports(&module), Err(Error::InvalidExportsError));

@@ -66,7 +66,7 @@ mod test {
 
     impl vm::Env for MockEnv {
         fn get_span_size(&self) -> i64 {
-            30000
+            300
         }
         fn get_calldata(&self) -> Result<Vec<u8>, Error> {
             Ok(vec![1])
@@ -143,7 +143,7 @@ mod test {
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let env = MockEnv {};
-        let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
+        let gas_used = run(&mut cache, &code, u64::MAX, true, env).unwrap();
         assert_eq!(gas_used, 800013 as u64);
     }
 
@@ -181,7 +181,37 @@ mod test {
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let env = MockEnv {};
-        let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
-        assert_eq!(gas_used, 830018 as u64);
+        let gas_used = run(&mut cache, &code, u64::MAX, true, env).unwrap();
+        assert_eq!(gas_used, 800318 as u64);
+    }
+
+    #[test]
+    fn test_out_of_gas() {
+        let wasm = wat2wasm(
+            r#"(module
+            (type (func (param i64 i64 i64 i64) (result)))
+            (func
+              (local $idx i32)
+              (local.set $idx (i32.const 0))
+              (block
+                  (loop
+                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 100000)))
+                  )
+                )
+            )
+            (func (;"execute": Resolves with result "beeb";)
+              )
+            (memory 17)
+            (data (i32.const 1048576) "beeb") (;str = "beeb";)
+            (export "prepare" (func 0))
+            (export "execute" (func 1)))
+          "#,
+        );
+        let code = compile(&wasm).unwrap();
+        let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
+        let env = MockEnv {};
+        let out_of_gas_err = run(&mut cache, &code, 0, true, env).unwrap_err();
+        assert_eq!(out_of_gas_err, Error::OutOfGasError);
     }
 }

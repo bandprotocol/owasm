@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use wasmer::{Singlepass, Store, Universal, wasmparser::Operator, CompilerConfig};
+use wasmer::wasmparser::Operator;
+use wasmer::{CompilerConfig, Singlepass, Store, Universal};
 use wasmer_middlewares::Metering;
 
 fn cost(_operator: &Operator) -> u64 {
