@@ -17,4 +17,4 @@ wasmer-middlewares = "2.3.0"
 # owasm-crypto = { path = "../crypto", version = "0.1.13" }
 tempfile = "3.1.0"
 clru = "0.2.0"
-cosmwasm-vm = "0.13.2"
+sha2 = "0.9.1"

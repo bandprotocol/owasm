@@ -21,6 +21,8 @@ pub enum Error {
     OutOfGasError = 12,      // Out-of-gas while executing the Wasm script.
     BadEntrySignatureError = 13, // Bad execution entry point signature.
     MemoryOutOfBoundError = 14, // Out-of-bound memory access while executing the wasm script
+    UninitializedContextData = 15, // Error while getting uninitialized context data.
+    ChecksumLengthNotMatch = 16, // Checksum not of intended length.
     // Host-generated errors while interacting with OEI.
     WrongPeriodActionError = 128, // OEI action to invoke is not available.
     TooManyExternalDataError = 129, // Too many external data requests.

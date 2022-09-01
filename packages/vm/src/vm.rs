@@ -3,7 +3,6 @@ use std::borrow::Borrow;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, RwLock};
 
-use cosmwasm_vm::{VmError, VmResult};
 use wasmer::{Instance, Memory, WasmerEnv};
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
@@ -109,16 +108,16 @@ where
         data.wasmer_instance = instance;
     }
 
-    pub fn with_wasmer_instance<C, R>(&self, callback: C) -> VmResult<R>
+    pub fn with_wasmer_instance<C, R>(&self, callback: C) -> Result<R, Error>
     where
-        C: FnOnce(&Instance) -> VmResult<R>,
+        C: FnOnce(&Instance) -> Result<R, Error>,
     {
         self.with_context_data(|context_data| match context_data.wasmer_instance {
             Some(instance_ptr) => {
                 let instance_ref = unsafe { instance_ptr.as_ref() };
                 callback(instance_ref)
             }
-            None => Err(VmError::UninitializedContextData { kind: "wasmer_instance".to_string() }),
+            None => Err(Error::UninitializedContextData),
         })
     }
 
