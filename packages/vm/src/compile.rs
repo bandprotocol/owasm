@@ -24,7 +24,7 @@ static SUPPORTED_IMPORTS: &[&str] = &[
     "env.ask_external_data",
     "env.get_external_data_status",
     "env.read_external_data",
-    "env.ecvrf_verify",
+    // "env.ecvrf_verify",
 ];
 
 pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
