@@ -149,12 +149,12 @@ where
         .expect("Wasmer instance is not set. This is a bug in the lifecycle.")
     }
 
-    pub fn decrease_gas_left(&self, gas_used: u64) -> Result<(), Error> {
+    pub fn decrease_gas_left(&self, gas: u64) -> Result<(), Error> {
         let gas_left = self.get_gas_left();
-        if gas_used > gas_left {
+        if gas > gas_left {
             Err(Error::OutOfGasError)
         } else {
-            self.set_gas_left(gas_left.saturating_sub(gas_used.into()));
+            self.set_gas_left(gas_left.saturating_sub(gas.into()));
             Ok(())
         }
     }
