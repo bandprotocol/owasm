@@ -9,12 +9,18 @@ pub use error::Error;
 use parity_wasm::builder;
 use parity_wasm::elements::{self, External, MemoryType, Module};
 pub use std::ptr::NonNull;
+use std::sync::Arc;
+use wasmer::Universal;
+use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
-use pwasm_utils::{self, rules};
+use pwasm_utils::{self};
 
-use wasmer::{imports, wasmparser, Function, Singlepass, Store, JIT};
+use wasmer::Singlepass;
 
-use owasm_crypto::{ecvrf};
+use wasmer::{imports, wasmparser, wasmparser::Operator, CompilerConfig, Function, Store};
+use wasmer_middlewares::Metering;
+
+// use owasm_crypto::ecvrf;
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -34,7 +40,7 @@ static SUPPORTED_IMPORTS: &[&str] = &[
     "env.ask_external_data",
     "env.get_external_data_status",
     "env.read_external_data",
-    "env.ecvrf_verify",
+    // "env.ecvrf_verify",
 ];
 
 fn inject_memory(module: Module) -> Result<Module, Error> {
@@ -71,12 +77,6 @@ fn inject_memory(module: Module) -> Result<Module, Error> {
 fn inject_stack_height(module: Module) -> Result<Module, Error> {
     pwasm_utils::stack_height::inject_limiter(module, MAX_STACK_HEIGHT)
         .map_err(|_| Error::StackHeightInjectionError)
-}
-
-fn inject_gas(module: Module) -> Result<Module, Error> {
-    // Simple gas rule. Every opcode and memory growth costs 1 gas.
-    let gas_rules = rules::Set::new(1, Default::default()).with_grow_cost(1);
-    pwasm_utils::inject_gas_counter(module, &gas_rules).map_err(|_| Error::GasCounterInjectionError)
 }
 
 fn check_wasm_exports(module: &Module) -> Result<(), Error> {
@@ -121,7 +121,6 @@ pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
     check_wasm_exports(&module)?;
     check_wasm_imports(&module)?;
     let module = inject_memory(module)?;
-    let module = inject_gas(module)?;
     let module = inject_stack_height(module)?;
 
     // Serialize the final Wasm code back to bytes.
@@ -135,33 +134,39 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
     Ok(())
 }
 
-fn get_from_mem<E: vm::Env>(env: &Environment<E>, ptr: i64, len: i64) -> Result<Vec<u8>, Error> {
-    let memory = env.memory()?;
-    require_mem_range(memory.size().bytes().0, (ptr + len) as usize)?;
-    Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
+// fn get_from_mem<E: vm::Env>(env: &Environment<E>, ptr: i64, len: i64) -> Result<Vec<u8>, Error> {
+//     let memory = env.memory()?;
+//     require_mem_range(memory.size().bytes().0, (ptr + len) as usize)?;
+//     Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
+// }
+
+fn cost(_operator: &Operator) -> u64 {
+    // A flat fee for each operation
+    1
 }
 
 pub fn run<E>(
     cache: &mut Cache,
     code: &[u8],
-    gas: u32,
+    gas: u64,
     is_prepare: bool,
     env: E,
-) -> Result<u32, Error>
+) -> Result<u64, Error>
 where
     E: vm::Env + 'static,
 {
-    let owasm_env = Environment::new(env, gas);
+    let owasm_env = Environment::new(env);
 
-    let compiler = Singlepass::new();
-    let store = Store::new(&JIT::new(compiler).engine());
+    let mut compiler = Singlepass::new();
+    let metering = Arc::new(Metering::new(0, cost));
+    compiler.push_middleware(metering);
+    let engine = Universal::new(compiler).engine();
+    let store = Store::new(&engine);
 
     let import_object = imports! {
         "env" => {
-            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, gas: u32| {
-                env.with_mut_vm(|vm| {
-                    vm.consume_gas(gas)
-                })
+            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, _gas: u32| {
+                env.decrease_gas_left(1)
             }),
             "get_span_size" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>| {
                 env.with_vm(|vm| {
@@ -172,7 +177,7 @@ where
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read calldata
-                    vm.consume_gas(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -195,7 +200,7 @@ where
                     }
 
                     // consume gas equal size of span when save data to memory
-                    vm.consume_gas(span_size as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -238,7 +243,7 @@ where
                     }
 
                     // consume gas equal size of span when write calldata for raw request
-                    vm.consume_gas(span_size  as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -256,7 +261,7 @@ where
                 env.with_mut_vm(|vm| -> Result<i64, Error>{
                     let span_size = vm.env.get_span_size();
                     // consume gas equal size of span when read data from report
-                    vm.consume_gas(span_size  as u32)?;
+                    env.decrease_gas_left(span_size as u64)?;
 
                     let memory = env.memory()?;
                     require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -270,24 +275,25 @@ where
                     Ok(data.len() as i64)
                 })
             }),
-            "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, y_ptr: i64, y_len: i64, pi_ptr: i64, pi_len: i64, alpha_ptr: i64, alpha_len: i64| {
-                env.with_mut_vm(|vm| -> Result<u32, Error>{
-                    // consume gas relatively to the function running time (~12ms)
-                    vm.consume_gas(500000)?;
+            // "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), |env: &Environment<E>, y_ptr: i64, y_len: i64, pi_ptr: i64, pi_len: i64, alpha_ptr: i64, alpha_len: i64| {
+            //     env.with_mut_vm(|vm| -> Result<u32, Error>{
+            //         // consume gas relatively to the function running time (~12ms)
+            //         vm.consume_gas(500000)?;
+            //         env.decrease_gas_left(500000)?;
 
-                    let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
-                    let pi: Vec<u8>= get_from_mem(env, pi_ptr, pi_len)?;
-                    let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
-                    
-                    Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
-                })
-            }),
+            //         let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
+            //         let pi: Vec<u8>= get_from_mem(env, pi_ptr, pi_len)?;
+            //         let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
+            //         Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
+            //     })
+            // }),
         },
     };
 
     let instance = cache.get_instance(code, &store, &import_object)?;
     let instance_ptr = NonNull::from(&instance);
     owasm_env.set_wasmer_instance(Some(instance_ptr));
+    owasm_env.set_gas_left(gas);
 
     // get function and exec
     let entry = if is_prepare { "prepare" } else { "execute" };
@@ -303,26 +309,66 @@ where
             return err.clone();
         }
 
-        owasm_env.with_vm(|vm| {
-            if vm.out_of_gas() {
-                return Error::OutOfGasError;
-            }
-
-            Error::RuntimeError
-        })
+        match get_remaining_points(&instance) {
+            MeteringPoints::Remaining(_) => Error::RuntimeError,
+            MeteringPoints::Exhausted => Error::OutOfGasError,
+        }
     })?;
 
-    Ok(owasm_env.with_vm(|vm| vm.gas_used))
+    match get_remaining_points(&instance) {
+        MeteringPoints::Remaining(count) => Ok(gas.saturating_sub(count)),
+        MeteringPoints::Exhausted => Err(Error::OutOfGasError),
+    }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::cache::CacheOptions;
+
     use super::*;
     use assert_matches::assert_matches;
     use parity_wasm::elements;
     use std::io::{Read, Write};
     use std::process::Command;
     use tempfile::NamedTempFile;
+
+    pub struct MockEnv {}
+
+    impl vm::Env for MockEnv {
+        fn get_span_size(&self) -> i64 {
+            30000
+        }
+        fn get_calldata(&self) -> Result<Vec<u8>, Error> {
+            Ok(vec![1])
+        }
+        fn set_return_data(&self, _: &[u8]) -> Result<(), Error> {
+            Ok(())
+        }
+        fn get_ask_count(&self) -> i64 {
+            10
+        }
+        fn get_min_count(&self) -> i64 {
+            8
+        }
+        fn get_prepare_time(&self) -> i64 {
+            100_000
+        }
+        fn get_execute_time(&self) -> Result<i64, Error> {
+            Ok(100_000)
+        }
+        fn get_ans_count(&self) -> Result<i64, Error> {
+            Ok(8)
+        }
+        fn ask_external_data(&self, _: i64, _: i64, _: &[u8]) -> Result<(), Error> {
+            Ok(())
+        }
+        fn get_external_data_status(&self, _: i64, _: i64) -> Result<i64, Error> {
+            Ok(1)
+        }
+        fn get_external_data(&self, _: i64, _: i64) -> Result<Vec<u8>, Error> {
+            Ok(vec![1])
+        }
+    }
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
         let mut input_file = NamedTempFile::new().unwrap();
@@ -363,11 +409,11 @@ mod test {
             (import "env" "ask_external_data" (func (type 0)))
             (func
               (local $idx i32)
-              (set_local $idx (i32.const 0))
+              (local.set $idx (i32.const 0))
               (block
                   (loop
-                    (set_local $idx (get_local $idx) (i32.const 1) (i32.add) )
-                    (br_if 0 (i32.lt_u (get_local $idx) (i32.const 1000000000)))
+                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 1000000000)))
                   )
                 )
             )
@@ -384,19 +430,13 @@ mod test {
             r#"(module
                 (type (;0;) (func (param i64 i64 i32 i64) (result i64)))
                 (type (;1;) (func))
-                (type (;2;) (func (param i32)))
                 (import "env" "ask_external_data" (func (;0;) (type 0)))
-                (import "env" "gas" (func (;1;) (type 2)))
-                (func (;2;) (type 1)
+                (func (;1;) (type 1)
                   (local i32)
-                  i32.const 4
-                  call 1
                   i32.const 0
                   local.set 0
                   block  ;; label = @1
                     loop  ;; label = @2
-                      i32.const 8
-                      call 1
                       local.get 0
                       i32.const 1
                       i32.add
@@ -407,8 +447,8 @@ mod test {
                       br_if 0 (;@2;)
                     end
                   end)
-                (func (;3;) (type 1))
-                (func (;4;) (type 1)
+                (func (;2;) (type 1))
+                (func (;3;) (type 1)
                   global.get 0
                   i32.const 3
                   i32.add
@@ -419,7 +459,7 @@ mod test {
                   if  ;; label = @1
                     unreachable
                   end
-                  call 2
+                  call 1
                   global.get 0
                   i32.const 3
                   i32.sub
@@ -427,10 +467,78 @@ mod test {
                 (memory (;0;) 17 512)
                 (global (;0;) (mut i32) (i32.const 0))
                 (export "prepare" (func 0))
-                (export "execute" (func 4))
+                (export "execute" (func 3))
                 (data (;0;) (i32.const 1048576) "beeb"))"#,
         );
         assert_eq!(code, expected);
+    }
+
+    #[test]
+    fn test_simple_gas_used() {
+        let wasm = wat2wasm(
+            r#"(module
+            (type (func (param i64 i64 i64 i64) (result)))
+            (func
+              (local $idx i32)
+              (local.set $idx (i32.const 0))
+              (block
+                  (loop
+                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 100000)))
+                  )
+                )
+            )
+            (func (;"execute": Resolves with result "beeb";)
+            )
+            (memory 17)
+            (data (i32.const 1048576) "beeb") (;str = "beeb";)
+            (export "prepare" (func 0))
+            (export "execute" (func 1)))
+          "#,
+        );
+        let code = compile(&wasm).unwrap();
+        let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
+        let env = MockEnv {};
+        let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
+        assert_eq!(gas_used, 800013 as u64);
+    }
+
+    #[test]
+    fn test_ask_count_gas_used() {
+        let wasm = wat2wasm(
+            r#"(module
+                (type (func (param i64 i64 i64 i64) (result)))
+                (import "env" "ask_external_data" (func (type 0)))
+                (func
+                    (local $idx i32)
+
+                    (i64.const 1)
+                    (i64.const 1)
+                    (i64.const 1048576)
+                    (i64.const 4)                  
+                    call 0
+
+                    (local.set $idx (i32.const 0))
+                    (block
+                        (loop
+                            (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                            (br_if 0 (i32.lt_u (local.get $idx) (i32.const 100000)))
+                        )
+                    )
+                )
+                (func (;"execute": Resolves with result "beeb";))
+                (memory (export "memory") 17)
+                (data (i32.const 1048576) "beeb")              
+                (export "prepare" (func 1))
+                (export "execute" (func 2)))
+            "#,
+        );
+
+        let code = compile(&wasm).unwrap();
+        let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
+        let env = MockEnv {};
+        let gas_used = run(&mut cache, &code, 4294967290, true, env).unwrap();
+        assert_eq!(gas_used, 830018 as u64);
     }
 
     #[test]
@@ -480,11 +588,11 @@ mod test {
             r#"(module
             (func
               (local $idx i32)
-              (set_local $idx (i32.const 0))
+              (local.set $idx (i32.const 0))
               (block
                   (loop
-                    (set_local $idx (get_local $idx) (i32.const 1) (i32.add) )
-                    (br_if 0 (i32.lt_u (get_local $idx) (i32.const 1000000000)))
+                    (local.set $idx (local.get $idx) (i32.const 1) (i32.add) )
+                    (br_if 0 (i32.lt_u (local.get $idx) (i32.const 1000000000)))
                   )
                 )
             )
