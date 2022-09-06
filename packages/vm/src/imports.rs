@@ -457,11 +457,8 @@ mod test {
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
-        let mut gas_left = gas_limit;
 
         assert_eq!(1, do_read_calldata(&owasm_env, 0).unwrap());
-        gas_left = gas_left - do_get_span_size(&owasm_env) as u64;
-        assert_eq!(gas_left, owasm_env.get_gas_left());
     }
 
     #[test]
@@ -471,11 +468,8 @@ mod test {
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
-        let mut gas_left = gas_limit;
 
-        do_set_return_data(&owasm_env, 0, 0).unwrap();
-        gas_left = gas_left - do_get_span_size(&owasm_env) as u64;
-        assert_eq!(gas_left, owasm_env.get_gas_left());
+        assert_eq!(Ok(()), do_set_return_data(&owasm_env, 0, 0))
     }
 
     #[test]
@@ -540,11 +534,8 @@ mod test {
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
-        let mut gas_left = gas_limit;
 
-        do_ask_external_data(&owasm_env, 0, 0, 0, 0).unwrap();
-        gas_left = gas_left - do_get_span_size(&owasm_env) as u64;
-        assert_eq!(gas_left, owasm_env.get_gas_left());
+        assert_eq!(Ok(()), do_ask_external_data(&owasm_env, 0, 0, 0, 0))
     }
 
     #[test]
@@ -565,10 +556,7 @@ mod test {
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
-        let mut gas_left = gas_limit;
 
         assert_eq!(1, do_read_external_data(&owasm_env, 0, 0, 0).unwrap());
-        gas_left = gas_left - do_get_span_size(&owasm_env) as u64;
-        assert_eq!(gas_left, owasm_env.get_gas_left());
     }
 }
