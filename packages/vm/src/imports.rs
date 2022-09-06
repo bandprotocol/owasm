@@ -74,9 +74,6 @@ fn do_get_ask_count<E>(env: &Environment<E>) -> i64
 where
     E: vm::Env + 'static,
 {
-    for i in 1..10000 {
-        let x = i;
-    }
     env.with_vm(|vm| vm.env.get_ask_count())
 }
 
