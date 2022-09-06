@@ -34,8 +34,6 @@ where
 {
     env.with_mut_vm(|vm| -> Result<i64, Error> {
         let span_size = vm.env.get_span_size();
-        // consume gas equal size of span when read calldata
-        env.decrease_gas_left(span_size as u64)?;
 
         let memory = env.memory()?;
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -61,9 +59,6 @@ where
             return Err(Error::SpanTooSmallError);
         }
 
-        // consume gas equal size of span when save data to memory
-        env.decrease_gas_left(span_size as u64)?;
-
         let memory = env.memory()?;
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
@@ -79,6 +74,9 @@ fn do_get_ask_count<E>(env: &Environment<E>) -> i64
 where
     E: vm::Env + 'static,
 {
+    for i in 1..10000 {
+        let x = i;
+    }
     env.with_vm(|vm| vm.env.get_ask_count())
 }
 
@@ -127,9 +125,6 @@ where
             return Err(Error::SpanTooSmallError);
         }
 
-        // consume gas equal size of span when write calldata for raw request
-        env.decrease_gas_left(span_size as u64)?;
-
         let memory = env.memory()?;
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
@@ -159,8 +154,6 @@ where
 {
     env.with_mut_vm(|vm| -> Result<i64, Error> {
         let span_size = vm.env.get_span_size();
-        // consume gas equal size of span when read data from report
-        env.decrease_gas_left(span_size as u64)?;
 
         let memory = env.memory()?;
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -189,7 +182,6 @@ where
 // {
 //     env.with_mut_vm(|vm| -> Result<u32, Error> {
 //         // consume gas relatively to the function running time (~12ms)
-//         env.decrease_gas_left(500000)?;
 
 //         let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
 //         let pi: Vec<u8> = get_from_mem(env, pi_ptr, pi_len)?;
