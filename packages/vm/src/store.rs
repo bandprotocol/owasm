@@ -6,7 +6,8 @@ use wasmer_middlewares::Metering;
 
 fn cost(_operator: &Operator) -> u64 {
     // A flat fee for each operation
-    1
+    // The target is 1 Teragas per millisecond
+    2_500_000
 }
 
 pub fn make_store() -> Store {

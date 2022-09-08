@@ -144,7 +144,7 @@ mod test {
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let env = MockEnv {};
         let gas_used = run(&mut cache, &code, u64::MAX, true, env).unwrap();
-        assert_eq!(gas_used, 800013 as u64);
+        assert_eq!(gas_used, 2000032500000 as u64);
     }
 
     #[test]
@@ -182,7 +182,7 @@ mod test {
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let env = MockEnv {};
         let gas_used = run(&mut cache, &code, u64::MAX, true, env).unwrap();
-        assert_eq!(gas_used, 800018 as u64);
+        assert_eq!(gas_used, 2000045000000 as u64);
     }
 
     #[test]
