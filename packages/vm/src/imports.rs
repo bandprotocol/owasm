@@ -18,7 +18,7 @@ fn do_gas<E>(env: &Environment<E>, _gas: u32) -> Result<(), Error>
 where
     E: vm::Env + 'static,
 {
-    env.decrease_gas_left(1)
+    env.decrease_gas_left(12500000)
 }
 
 fn do_get_span_size<E>(env: &Environment<E>) -> i64
@@ -429,19 +429,19 @@ mod test {
 
     #[test]
     fn test_do_gas() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
         do_gas(&owasm_env, 0).unwrap();
-        assert_eq!(gas_limit - 1, owasm_env.get_gas_left());
+        assert_eq!(gas_limit - 12500000, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_span_size() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -452,7 +452,7 @@ mod test {
 
     #[test]
     fn test_do_read_calldata() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -463,7 +463,7 @@ mod test {
 
     #[test]
     fn test_do_set_return_data() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -474,7 +474,7 @@ mod test {
 
     #[test]
     fn test_do_get_ask_count() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -485,7 +485,7 @@ mod test {
 
     #[test]
     fn test_do_get_min_count() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -496,7 +496,7 @@ mod test {
 
     #[test]
     fn test_do_get_prepare_time() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -507,7 +507,7 @@ mod test {
 
     #[test]
     fn test_do_get_execute_time() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -518,7 +518,7 @@ mod test {
 
     #[test]
     fn test_do_get_ans_count() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -529,7 +529,7 @@ mod test {
 
     #[test]
     fn test_do_ask_external_data() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -540,7 +540,7 @@ mod test {
 
     #[test]
     fn test_do_get_external_data_status() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
@@ -551,7 +551,7 @@ mod test {
 
     #[test]
     fn test_do_read_external_data() {
-        let gas_limit = 1_000_000;
+        let gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
