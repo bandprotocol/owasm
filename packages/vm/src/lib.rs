@@ -1,5 +1,5 @@
 pub mod cache;
-pub mod calls;
+mod calls;
 mod checksum;
 mod compile;
 pub mod error;
