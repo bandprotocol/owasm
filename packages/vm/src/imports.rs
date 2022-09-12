@@ -1,9 +1,7 @@
-use wasmer::{imports, Function, ImportObject, Store};
+use crate::error::Error;
+use crate::vm::{Env, Environment};
 
-use crate::{
-    vm::{self, Environment},
-    Error,
-};
+use wasmer::{imports, Function, ImportObject, Store};
 
 // use owasm_crypto::ecvrf;
 
@@ -16,21 +14,21 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
 
 fn do_gas<E>(env: &Environment<E>, _gas: u32) -> Result<(), Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.decrease_gas_left(12500000)
 }
 
 fn do_get_span_size<E>(env: &Environment<E>) -> i64
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_vm(|vm| vm.env.get_span_size())
 }
 
 fn do_read_calldata<E>(env: &Environment<E>, ptr: i64) -> Result<i64, Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_mut_vm(|vm| -> Result<i64, Error> {
         let span_size = vm.env.get_span_size();
@@ -50,7 +48,7 @@ where
 
 fn do_set_return_data<E>(env: &Environment<E>, ptr: i64, len: i64) -> Result<(), Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_mut_vm(|vm| {
         let span_size = vm.env.get_span_size();
@@ -72,35 +70,35 @@ where
 
 fn do_get_ask_count<E>(env: &Environment<E>) -> i64
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_vm(|vm| vm.env.get_ask_count())
 }
 
 fn do_get_min_count<E>(env: &Environment<E>) -> i64
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_vm(|vm| vm.env.get_min_count())
 }
 
 fn do_get_prepare_time<E>(env: &Environment<E>) -> i64
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_vm(|vm| vm.env.get_prepare_time())
 }
 
 fn do_get_execute_time<E>(env: &Environment<E>) -> Result<i64, Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_vm(|vm| vm.env.get_execute_time())
 }
 
 fn do_get_ans_count<E>(env: &Environment<E>) -> Result<i64, Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_vm(|vm| vm.env.get_ans_count())
 }
@@ -113,7 +111,7 @@ fn do_ask_external_data<E>(
     len: i64,
 ) -> Result<(), Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_mut_vm(|vm| {
         let span_size = vm.env.get_span_size();
@@ -135,7 +133,7 @@ where
 
 fn do_get_external_data_status<E>(env: &Environment<E>, eid: i64, vid: i64) -> Result<i64, Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_vm(|vm| vm.env.get_external_data_status(eid, vid))
 }
@@ -147,7 +145,7 @@ fn do_read_external_data<E>(
     ptr: i64,
 ) -> Result<i64, Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     env.with_mut_vm(|vm| -> Result<i64, Error> {
         let span_size = vm.env.get_span_size();
@@ -175,7 +173,7 @@ where
 //     alpha_len: i64,
 // ) -> Result<u32, Error>
 // where
-//     E: vm::Env + 'static,
+//     E: Env + 'static,
 // {
 //     env.with_mut_vm(|vm| -> Result<u32, Error> {
 //         // consume gas relatively to the function running time (~12ms)
@@ -189,7 +187,7 @@ where
 
 pub fn create_import_object<E>(store: &Store, owasm_env: Environment<E>) -> ImportObject
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     imports! {
         "env" => {
@@ -213,30 +211,23 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::{
-        io::{Read, Write},
-        process::Command,
-        ptr::NonNull,
-    };
 
+    use crate::cache::{Cache, CacheOptions};
+    use crate::compile::compile;
+    use crate::store::make_store;
+
+    use std::io::{Read, Write};
+    use std::process::Command;
+    use std::ptr::NonNull;
     use tempfile::NamedTempFile;
-
-    use crate::{
-        cache::{Cache, CacheOptions},
-        compile,
-        store::make_store,
-        vm::{self, Environment},
-        Error,
-    };
-
+    use wasmer::ExternType::Function;
     use wasmer::FunctionType;
-    use wasmer::ValType::I32;
-    use wasmer::ValType::I64;
-    use wasmer::{ExternType::Function, Instance};
+    use wasmer::Instance;
+    use wasmer::ValType::{I32, I64};
 
     pub struct MockEnv {}
 
-    impl vm::Env for MockEnv {
+    impl Env for MockEnv {
         fn get_span_size(&self) -> i64 {
             300
         }

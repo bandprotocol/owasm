@@ -1,8 +1,8 @@
 use crate::error::Error;
+
 use std::borrow::Borrow;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, RwLock};
-
 use wasmer::{Instance, Memory, WasmerEnv};
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 

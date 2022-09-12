@@ -1,10 +1,10 @@
+use crate::Error;
+
 use wasm_instrument::parity_wasm::{
     builder,
-    elements::{self, External, MemoryType, Module},
+    elements::{deserialize_buffer, serialize, External, MemoryType, Module},
 };
 use wasmer::wasmparser;
-
-use crate::Error;
 
 // inspired by https://github.com/CosmWasm/cosmwasm/issues/81
 // 512 pages = 32mb
@@ -32,14 +32,14 @@ pub fn compile(code: &[u8]) -> Result<Vec<u8>, Error> {
     wasmparser::validate(code).map_err(|_| Error::ValidationError)?;
 
     // Start the compiling chains.
-    let module = elements::deserialize_buffer(code).map_err(|_| Error::DeserializationError)?;
+    let module = deserialize_buffer(code).map_err(|_| Error::DeserializationError)?;
     check_wasm_exports(&module)?;
     check_wasm_imports(&module)?;
     let module = inject_memory(module)?;
     let module = inject_stack_height(module)?;
 
     // Serialize the final Wasm code back to bytes.
-    elements::serialize(module).map_err(|_| Error::SerializationError)
+    serialize(module).map_err(|_| Error::SerializationError)
 }
 
 fn check_wasm_exports(module: &Module) -> Result<(), Error> {
@@ -114,14 +114,11 @@ fn inject_stack_height(module: Module) -> Result<Module, Error> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use assert_matches::assert_matches;
-    use std::{
-        io::{Read, Write},
-        process::Command,
-    };
 
+    use assert_matches::assert_matches;
+    use std::io::{Read, Write};
+    use std::process::Command;
     use tempfile::NamedTempFile;
-    use wasm_instrument::parity_wasm::elements::{self, Module};
 
     fn wat2wasm(wat: impl AsRef<[u8]>) -> Vec<u8> {
         let mut input_file = NamedTempFile::new().unwrap();
@@ -141,7 +138,7 @@ mod test {
     }
 
     fn get_module_from_wasm(code: &[u8]) -> Module {
-        match elements::deserialize_buffer(code) {
+        match deserialize_buffer(code) {
             Ok(deserialized) => deserialized,
             Err(_) => panic!("Cannot deserialized"),
         }
@@ -219,7 +216,7 @@ mod test {
           "#,
         );
         let module = inject_stack_height(get_module_from_wasm(&wasm)).unwrap();
-        let wasm = elements::serialize(module).unwrap();
+        let wasm = serialize(module).unwrap();
         let expected = wat2wasm(
             r#"(module
                 (type (;0;) (func))

@@ -1,11 +1,10 @@
-use std::convert::TryFrom;
-
-use sha2::{Digest, Sha256};
-
 use crate::Error;
 
+use sha2::{Digest, Sha256};
+use std::convert::TryFrom;
+
 /// This is a copy of checksum.rs from https://github.com/CosmWasm/cosmwasm/blob/6082e8a35a193f1365cb3367f77bd87c593a7ae4/packages/vm/src/checksum.rs
-/// 
+///
 /// A SHA-256 checksum of a Wasm blob, used to identify a Wasm code.
 /// This must remain stable since this checksum is stored in the blockchain state.
 ///
