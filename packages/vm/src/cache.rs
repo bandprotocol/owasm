@@ -1,4 +1,5 @@
-use crate::{error::Error, checksum::Checksum};
+use crate::checksum::Checksum;
+use crate::error::Error;
 
 use clru::CLruCache;
 use wasmer::{Instance, Module, Store};

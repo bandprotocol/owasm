@@ -1,10 +1,10 @@
 use crate::cache::Cache;
+use crate::error::Error;
 use crate::imports::create_import_object;
 use crate::store::make_store;
-use crate::vm::{self, Environment};
+use crate::vm::{Env, Environment};
 
-pub use crate::error::Error;
-pub use std::ptr::NonNull;
+use std::ptr::NonNull;
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
 pub fn run<E>(
@@ -15,7 +15,7 @@ pub fn run<E>(
     env: E,
 ) -> Result<u64, Error>
 where
-    E: vm::Env + 'static,
+    E: Env + 'static,
 {
     let owasm_env = Environment::new(env);
     let store = make_store();
@@ -64,7 +64,7 @@ mod test {
 
     pub struct MockEnv {}
 
-    impl vm::Env for MockEnv {
+    impl Env for MockEnv {
         fn get_span_size(&self) -> i64 {
             300
         }
