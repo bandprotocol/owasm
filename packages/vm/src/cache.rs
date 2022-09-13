@@ -1,7 +1,7 @@
+use crate::checksum::Checksum;
 use crate::error::Error;
 
 use clru::CLruCache;
-use cosmwasm_vm::Checksum;
 use wasmer::{Instance, Module, Store};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
