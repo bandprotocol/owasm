@@ -148,7 +148,7 @@ mod test {
     }
 
     #[test]
-    fn test_ask_count_gas_used() {
+    fn test_ask_external_data_gas_used() {
         let wasm = wat2wasm(
             r#"(module
                 (type (func (param i64 i64 i64 i64) (result)))
