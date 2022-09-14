@@ -17,8 +17,8 @@ fn cost(operator: &Operator) -> u64 {
         | Operator::Call { .. } // function call - branch source
         | Operator::CallIndirect { .. } // function call - branch source
         | Operator::Return // end of function - branch source
-        => { return 10_000_000 }
-        _ => { return 2_500_000 }
+        => { return 2_500_000 }
+        _ => { return 625_000 }
     }
 }
 
