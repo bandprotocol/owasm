@@ -2,13 +2,16 @@ use crate::error::Error;
 
 use std::borrow::Borrow;
 use std::ptr::NonNull;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use wasmer::{Instance, Memory, WasmerEnv};
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
-pub trait Env {
+pub trait BackendApi {
     /// Returns the maximum span size value.
     fn get_span_size(&self) -> i64;
+}
+
+pub trait Querier {
     /// Returns user calldata, or returns error from VM runner.
     fn get_calldata(&self) -> Result<Vec<u8>, Error>;
     /// Sends the desired return `data` to VM runner, or returns error from VM runner.
@@ -31,24 +34,6 @@ pub trait Env {
     fn get_external_data(&self, eid: i64, vid: i64) -> Result<Vec<u8>, Error>;
 }
 
-/// A `VMLogic` encapsulates the runtime logic of Owasm scripts.
-pub struct VMLogic<E>
-where
-    E: Env,
-{
-    pub env: E, // The execution environment.
-}
-
-impl<E> VMLogic<E>
-where
-    E: Env,
-{
-    /// Creates a new `VMLogic` instance.
-    pub fn new(env: E) -> Self {
-        Self { env: env }
-    }
-}
-
 pub struct ContextData {
     /// A non-owning link to the wasmer instance
     wasmer_instance: Option<NonNull<Instance>>,
@@ -61,45 +46,53 @@ impl ContextData {
 }
 
 #[derive(WasmerEnv)]
-pub struct Environment<E>
+pub struct Environment<A, Q>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    vm: Arc<Mutex<VMLogic<E>>>,
+    pub api: Arc<Mutex<A>>,
+    pub querier: Arc<Mutex<Q>>,
     data: Arc<RwLock<ContextData>>,
 }
 
-impl<E: Env + 'static> Clone for Environment<E> {
+impl<A: BackendApi + 'static, Q: Querier + 'static> Clone for Environment<A, Q> {
     fn clone(&self) -> Self {
-        Self { vm: Arc::clone(&self.vm), data: self.data.clone() }
+        Self {
+            api: Arc::clone(&self.api),
+            querier: Arc::clone(&self.querier),
+            data: self.data.clone(),
+        }
     }
 }
-unsafe impl<E: Env> Send for Environment<E> {}
-unsafe impl<E: Env> Sync for Environment<E> {}
+unsafe impl<A: BackendApi, Q: Querier> Send for Environment<A, Q> {}
+unsafe impl<A: BackendApi, Q: Querier> Sync for Environment<A, Q> {}
 
-impl<E> Environment<E>
+impl<A, Q> Environment<A, Q>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    pub fn new(e: E) -> Self {
+    pub fn new(a: A, q: Q) -> Self {
         Self {
-            vm: Arc::new(Mutex::new(VMLogic::<E>::new(e))),
+            api: Arc::new(Mutex::new(a)),
+            querier: Arc::new(Mutex::new(q)),
             data: Arc::new(RwLock::new(ContextData::new())),
         }
     }
 
-    pub fn with_vm<C, R>(&self, callback: C) -> R
+    pub fn get_api(&self) -> MutexGuard<'_, A>
     where
-        C: FnOnce(&VMLogic<E>) -> R,
+        A: BackendApi + 'static,
     {
-        callback(&self.vm.lock().unwrap())
+        self.api.lock().unwrap()
     }
 
-    pub fn with_mut_vm<C, R>(&self, callback: C) -> R
+    pub fn get_querier(&self) -> MutexGuard<'_, Q>
     where
-        C: FnOnce(&mut VMLogic<E>) -> R,
+        Q: Querier + 'static,
     {
-        callback(&mut self.vm.lock().unwrap())
+        self.querier.lock().unwrap()
     }
 
     /// Creates a back reference from a contact to its partent instance
@@ -193,12 +186,17 @@ mod test {
 
     use super::*;
 
-    pub struct MockEnv {}
+    pub struct MockApi {}
 
-    impl Env for MockEnv {
+    impl BackendApi for MockApi {
         fn get_span_size(&self) -> i64 {
             300
         }
+    }
+
+    pub struct MockQuerier {}
+
+    impl Querier for MockQuerier {
         fn get_calldata(&self) -> Result<Vec<u8>, Error> {
             Ok(vec![1])
         }
@@ -250,14 +248,14 @@ mod test {
 
     #[test]
     fn test_env_vm() {
-        let env = Environment::new(MockEnv {});
-        assert_eq!(300, env.with_vm(|vm| vm.env.get_span_size()));
-        assert_eq!(300, env.with_mut_vm(|vm| vm.env.get_span_size()));
+        let env = Environment::new(MockApi {}, MockQuerier {});
+        assert_eq!(300, env.get_api().get_span_size());
+        assert_eq!(300, env.get_api().get_span_size());
     }
 
     #[test]
     fn test_env_wasmer_instance() {
-        let env = Environment::new(MockEnv {});
+        let env = Environment::new(MockApi {}, MockQuerier {});
         assert_eq!(
             Error::UninitializedContextData,
             env.with_wasmer_instance(|_| { Ok(()) }).unwrap_err()
@@ -280,7 +278,7 @@ mod test {
 
     #[test]
     fn test_env_gas() {
-        let env = Environment::new(MockEnv {});
+        let env = Environment::new(MockApi {}, MockQuerier {});
         let wasm = wat2wasm(
             r#"(module
                 (func $execute (export "execute"))

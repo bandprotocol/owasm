@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::vm::{Env, Environment};
+use crate::vm::{BackendApi, Environment, Querier};
 
 use wasmer::{imports, Function, ImportObject, Store};
 
@@ -12,159 +12,163 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
     Ok(())
 }
 
-fn do_gas<E>(env: &Environment<E>, _gas: u32) -> Result<(), Error>
+fn do_gas<A, Q>(env: &Environment<A, Q>, _gas: u32) -> Result<(), Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
     env.decrease_gas_left(12500000)
 }
 
-fn do_get_span_size<E>(env: &Environment<E>) -> i64
+fn do_get_span_size<A, Q>(env: &Environment<A, Q>) -> i64
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_span_size())
+    env.get_api().get_span_size()
 }
 
-fn do_read_calldata<E>(env: &Environment<E>, ptr: i64) -> Result<i64, Error>
+fn do_read_calldata<A, Q>(env: &Environment<A, Q>, ptr: i64) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| -> Result<i64, Error> {
-        let span_size = vm.env.get_span_size();
+    let span_size = env.get_api().get_span_size();
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
-        let data = vm.env.get_calldata()?;
+    let data = env.get_querier().get_calldata()?;
 
-        for (idx, byte) in data.iter().enumerate() {
-            memory.view()[ptr as usize + idx].set(*byte);
-        }
+    for (idx, byte) in data.iter().enumerate() {
+        memory.view()[ptr as usize + idx].set(*byte);
+    }
 
-        Ok(data.len() as i64)
-    })
+    Ok(data.len() as i64)
 }
 
-fn do_set_return_data<E>(env: &Environment<E>, ptr: i64, len: i64) -> Result<(), Error>
+fn do_set_return_data<A, Q>(env: &Environment<A, Q>, ptr: i64, len: i64) -> Result<(), Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| {
-        let span_size = vm.env.get_span_size();
+    let span_size = env.get_api().get_span_size();
 
-        if len > span_size {
-            return Err(Error::SpanTooSmallError);
-        }
+    if len > span_size {
+        return Err(Error::SpanTooSmallError);
+    }
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
-        let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize]
-            .iter()
-            .map(|cell| cell.get())
-            .collect();
-        vm.env.set_return_data(&data)
-    })
+    let data: Vec<u8> =
+        memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
+    env.get_querier().set_return_data(&data)
 }
 
-fn do_get_ask_count<E>(env: &Environment<E>) -> i64
+fn do_get_ask_count<A, Q>(env: &Environment<A, Q>) -> i64
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_ask_count())
+    env.get_querier().get_ask_count()
 }
 
-fn do_get_min_count<E>(env: &Environment<E>) -> i64
+fn do_get_min_count<A, Q>(env: &Environment<A, Q>) -> i64
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_min_count())
+    env.get_querier().get_min_count()
 }
 
-fn do_get_prepare_time<E>(env: &Environment<E>) -> i64
+fn do_get_prepare_time<A, Q>(env: &Environment<A, Q>) -> i64
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_prepare_time())
+    env.get_querier().get_prepare_time()
 }
 
-fn do_get_execute_time<E>(env: &Environment<E>) -> Result<i64, Error>
+fn do_get_execute_time<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_execute_time())
+    env.get_querier().get_execute_time()
 }
 
-fn do_get_ans_count<E>(env: &Environment<E>) -> Result<i64, Error>
+fn do_get_ans_count<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_ans_count())
+    env.get_querier().get_ans_count()
 }
 
-fn do_ask_external_data<E>(
-    env: &Environment<E>,
+fn do_ask_external_data<A, Q>(
+    env: &Environment<A, Q>,
     eid: i64,
     did: i64,
     ptr: i64,
     len: i64,
 ) -> Result<(), Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| {
-        let span_size = vm.env.get_span_size();
+    let span_size = env.get_api().get_span_size();
 
-        if len > span_size {
-            return Err(Error::SpanTooSmallError);
-        }
+    if len > span_size {
+        return Err(Error::SpanTooSmallError);
+    }
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
-        let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize]
-            .iter()
-            .map(|cell| cell.get())
-            .collect();
-        vm.env.ask_external_data(eid, did, &data)
-    })
+    let data: Vec<u8> =
+        memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
+    env.get_querier().ask_external_data(eid, did, &data)
 }
 
-fn do_get_external_data_status<E>(env: &Environment<E>, eid: i64, vid: i64) -> Result<i64, Error>
+fn do_get_external_data_status<A, Q>(
+    env: &Environment<A, Q>,
+    eid: i64,
+    vid: i64,
+) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_external_data_status(eid, vid))
+    env.get_querier().get_external_data_status(eid, vid)
 }
 
-fn do_read_external_data<E>(
-    env: &Environment<E>,
+fn do_read_external_data<A, Q>(
+    env: &Environment<A, Q>,
     eid: i64,
     vid: i64,
     ptr: i64,
 ) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| -> Result<i64, Error> {
-        let span_size = vm.env.get_span_size();
+    let span_size = env.get_api().get_span_size();
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
-        let data = vm.env.get_external_data(eid, vid)?;
+    let data = env.get_querier().get_external_data(eid, vid)?;
 
-        for (idx, byte) in data.iter().enumerate() {
-            memory.view()[ptr as usize + idx].set(*byte);
-        }
+    for (idx, byte) in data.iter().enumerate() {
+        memory.view()[ptr as usize + idx].set(*byte);
+    }
 
-        Ok(data.len() as i64)
-    })
+    Ok(data.len() as i64)
 }
 
-// fn do_ecvrf_verify<E>(
-//     env: &Environment<E>,
+// fn do_ecvrf_verify<E, Q>(
+//     env: &Environment<E, Q>,
 //     y_ptr: i64,
 //     y_len: i64,
 //     pi_ptr: i64,
@@ -174,20 +178,20 @@ where
 // ) -> Result<u32, Error>
 // where
 //     E: Env + 'static,
+//     Q: Querier + 'static,
 // {
-//     env.with_mut_vm(|vm| -> Result<u32, Error> {
-//         // consume gas relatively to the function running time (~12ms)
+//     // consume gas relatively to the function running time (~12ms)
 
-//         let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
-//         let pi: Vec<u8> = get_from_mem(env, pi_ptr, pi_len)?;
-//         let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
-//         Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
-//     })
+//     let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
+//     let pi: Vec<u8> = get_from_mem(env, pi_ptr, pi_len)?;
+//     let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
+//     Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
 // }
 
-pub fn create_import_object<E>(store: &Store, owasm_env: Environment<E>) -> ImportObject
+pub fn create_import_object<A, Q>(store: &Store, owasm_env: Environment<A, Q>) -> ImportObject
 where
-    E: Env + 'static,
+    A: BackendApi + 'static,
+    Q: Querier + 'static,
 {
     imports! {
         "env" => {
@@ -215,6 +219,7 @@ mod test {
     use crate::cache::{Cache, CacheOptions};
     use crate::compile::compile;
     use crate::store::make_store;
+    use crate::vm::BackendApi;
 
     use std::io::{Read, Write};
     use std::process::Command;
@@ -225,12 +230,17 @@ mod test {
     use wasmer::Instance;
     use wasmer::ValType::{I32, I64};
 
-    pub struct MockEnv {}
+    pub struct MockApi {}
 
-    impl Env for MockEnv {
+    impl BackendApi for MockApi {
         fn get_span_size(&self) -> i64 {
             300
         }
+    }
+
+    pub struct MockQuerier {}
+
+    impl Querier for MockQuerier {
         fn get_calldata(&self) -> Result<Vec<u8>, Error> {
             Ok(vec![1])
         }
@@ -280,7 +290,7 @@ mod test {
         wasm
     }
 
-    fn create_owasm_env() -> (Environment<MockEnv>, Instance) {
+    fn create_owasm_env() -> (Environment<MockApi, MockQuerier>, Instance) {
         let wasm = wat2wasm(
             r#"(module
             (func
@@ -295,8 +305,9 @@ mod test {
         );
         let code = compile(&wasm).unwrap();
 
-        let env = MockEnv {};
-        let owasm_env = Environment::new(env);
+        let api = MockApi {};
+        let querier = MockQuerier {};
+        let owasm_env = Environment::new(api, querier);
         let store = make_store();
         let import_object = create_import_object(&store, owasm_env.clone());
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
@@ -307,8 +318,9 @@ mod test {
 
     #[test]
     fn test_import_object_function_type() {
-        let env = MockEnv {};
-        let owasm_env = Environment::new(env);
+        let api = MockApi {};
+        let querier = MockQuerier {};
+        let owasm_env = Environment::new(api, querier);
         let store = make_store();
         assert_eq!(create_import_object(&store, owasm_env.clone()).externs_vec().len(), 12);
 
