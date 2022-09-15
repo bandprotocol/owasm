@@ -167,8 +167,8 @@ where
     Ok(data.len() as i64)
 }
 
-// fn do_ecvrf_verify<E, Q>(
-//     env: &Environment<E, Q>,
+// fn do_ecvrf_verify<A, Q>(
+//     env: &Environment<A, Q>,
 //     y_ptr: i64,
 //     y_len: i64,
 //     pi_ptr: i64,
@@ -177,7 +177,7 @@ where
 //     alpha_len: i64,
 // ) -> Result<u32, Error>
 // where
-//     E: Env + 'static,
+//     A: BackendApi + 'static,
 //     Q: Querier + 'static,
 // {
 //     // consume gas relatively to the function running time (~12ms)
