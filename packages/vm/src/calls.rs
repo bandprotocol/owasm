@@ -67,15 +67,14 @@ mod test {
 
     pub struct MockApi {}
 
-    impl BackendApi for MockApi {
-        fn get_span_size(&self) -> i64 {
-            300
-        }
-    }
+    impl BackendApi for MockApi {}
 
     pub struct MockQuerier {}
 
     impl Querier for MockQuerier {
+        fn get_span_size(&self) -> i64 {
+            300
+        }
         fn get_calldata(&self) -> Result<Vec<u8>, Error> {
             Ok(vec![1])
         }

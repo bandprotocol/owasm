@@ -14,7 +14,7 @@ hex = "0.4"
 wasm-instrument = "0.2.0"
 wasmer = { version = "2.3.0", default-features = false, features = ["singlepass", "compiler", "universal"] }
 wasmer-middlewares = "2.3.0"
-# owasm-crypto = { path = "../crypto", version = "0.1.13" }
+owasm-crypto = { path = "../crypto", version = "0.1.13" }
 tempfile = "3.1.0"
 clru = "0.2.0"
 sha2 = "0.9.1"

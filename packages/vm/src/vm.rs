@@ -2,16 +2,15 @@ use crate::error::Error;
 
 use std::borrow::Borrow;
 use std::ptr::NonNull;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use wasmer::{Instance, Memory, WasmerEnv};
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
-pub trait BackendApi {
-    /// Returns the maximum span size value.
-    fn get_span_size(&self) -> i64;
-}
+pub trait BackendApi {}
 
 pub trait Querier {
+    /// Returns the maximum span size value.
+    fn get_span_size(&self) -> i64;
     /// Returns user calldata, or returns error from VM runner.
     fn get_calldata(&self) -> Result<Vec<u8>, Error>;
     /// Sends the desired return `data` to VM runner, or returns error from VM runner.
@@ -34,14 +33,15 @@ pub trait Querier {
     fn get_external_data(&self, eid: i64, vid: i64) -> Result<Vec<u8>, Error>;
 }
 
-pub struct ContextData {
+pub struct ContextData<Q: Querier> {
+    querier: Q,
     /// A non-owning link to the wasmer instance
     wasmer_instance: Option<NonNull<Instance>>,
 }
 
-impl ContextData {
-    pub fn new() -> Self {
-        ContextData { wasmer_instance: None }
+impl<Q: Querier> ContextData<Q> {
+    pub fn new(querier: Q) -> Self {
+        ContextData::<Q> { wasmer_instance: None, querier }
     }
 }
 
@@ -52,17 +52,12 @@ where
     Q: Querier + 'static,
 {
     pub api: Arc<Mutex<A>>,
-    pub querier: Arc<Mutex<Q>>,
-    data: Arc<RwLock<ContextData>>,
+    data: Arc<RwLock<ContextData<Q>>>,
 }
 
 impl<A: BackendApi + 'static, Q: Querier + 'static> Clone for Environment<A, Q> {
     fn clone(&self) -> Self {
-        Self {
-            api: Arc::clone(&self.api),
-            querier: Arc::clone(&self.querier),
-            data: self.data.clone(),
-        }
+        Self { api: Arc::clone(&self.api), data: self.data.clone() }
     }
 }
 unsafe impl<A: BackendApi, Q: Querier> Send for Environment<A, Q> {}
@@ -74,25 +69,14 @@ where
     Q: Querier + 'static,
 {
     pub fn new(a: A, q: Q) -> Self {
-        Self {
-            api: Arc::new(Mutex::new(a)),
-            querier: Arc::new(Mutex::new(q)),
-            data: Arc::new(RwLock::new(ContextData::new())),
-        }
+        Self { api: Arc::new(Mutex::new(a)), data: Arc::new(RwLock::new(ContextData::new(q))) }
     }
 
-    pub fn get_api(&self) -> MutexGuard<'_, A>
+    pub fn with_querier_from_context<C, R>(&self, callback: C) -> R
     where
-        A: BackendApi + 'static,
+        C: FnOnce(&Q) -> R,
     {
-        self.api.lock().unwrap()
-    }
-
-    pub fn get_querier(&self) -> MutexGuard<'_, Q>
-    where
-        Q: Querier + 'static,
-    {
-        self.querier.lock().unwrap()
+        self.with_context_data(|context_data| callback(&context_data.querier))
     }
 
     /// Creates a back reference from a contact to its partent instance
@@ -116,12 +100,21 @@ where
 
     fn with_context_data<C, R>(&self, callback: C) -> R
     where
-        C: FnOnce(&ContextData) -> R,
+        C: FnOnce(&ContextData<Q>) -> R,
     {
         let guard = self.data.as_ref().read().unwrap();
         let context_data = guard.borrow();
         callback(context_data)
     }
+
+    // fn with_context_data_mut<C, R>(&self, callback: C) -> R
+    // where
+    //     C: FnOnce(&mut ContextData<Q>) -> R,
+    // {
+    //     let mut guard = self.data.as_ref().write().unwrap();
+    //     let context_data = guard.borrow_mut();
+    //     callback(context_data)
+    // }
 
     pub fn get_gas_left(&self) -> u64 {
         self.with_wasmer_instance(|instance| {
@@ -188,15 +181,14 @@ mod test {
 
     pub struct MockApi {}
 
-    impl BackendApi for MockApi {
-        fn get_span_size(&self) -> i64 {
-            300
-        }
-    }
+    impl BackendApi for MockApi {}
 
     pub struct MockQuerier {}
 
     impl Querier for MockQuerier {
+        fn get_span_size(&self) -> i64 {
+            300
+        }
         fn get_calldata(&self) -> Result<Vec<u8>, Error> {
             Ok(vec![1])
         }
@@ -247,10 +239,9 @@ mod test {
     }
 
     #[test]
-    fn test_env_vm() {
+    fn test_env_querier() {
         let env = Environment::new(MockApi {}, MockQuerier {});
-        assert_eq!(300, env.get_api().get_span_size());
-        assert_eq!(300, env.get_api().get_span_size());
+        assert_eq!(300, env.with_querier_from_context(|querier| querier.get_span_size()));
     }
 
     #[test]
