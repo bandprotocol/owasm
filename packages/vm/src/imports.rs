@@ -12,20 +12,22 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
     Ok(())
 }
 
-fn do_gas<A, Q>(_env: &Environment<A, Q>, _gas: u32) -> Result<(), Error>
+fn do_gas<A, Q>(env: &Environment<A, Q>, _gas: u32) -> Result<(), Error>
 where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
+    env.decrease_gas_left(750_000_000)?;
     Ok(())
 }
 
-fn do_get_span_size<A, Q>(env: &Environment<A, Q>) -> i64
+fn do_get_span_size<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
 where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
-    env.with_querier_from_context(|querier| querier.get_span_size())
+    env.decrease_gas_left(750_000_000)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_span_size()))
 }
 
 fn do_read_calldata<A, Q>(env: &Environment<A, Q>, ptr: i64) -> Result<i64, Error>
@@ -40,6 +42,7 @@ where
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
         let data = querier.get_calldata()?;
+        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 30_000_000)?;
 
         for (idx, byte) in data.iter().enumerate() {
             memory.view()[ptr as usize + idx].set(*byte);
@@ -60,6 +63,7 @@ where
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
+        env.decrease_gas_left(1_500_000_000 + (len as u64) * 50_000_000)?;
 
         let memory = env.memory()?;
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -72,28 +76,31 @@ where
     })
 }
 
-fn do_get_ask_count<A, Q>(env: &Environment<A, Q>) -> i64
+fn do_get_ask_count<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
 where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
-    env.with_querier_from_context(|querier| querier.get_ask_count())
+    env.decrease_gas_left(750_000_000)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_ask_count()))
 }
 
-fn do_get_min_count<A, Q>(env: &Environment<A, Q>) -> i64
+fn do_get_min_count<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
 where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
-    env.with_querier_from_context(|querier| querier.get_min_count())
+    env.decrease_gas_left(750_000_000)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_min_count()))
 }
 
-fn do_get_prepare_time<A, Q>(env: &Environment<A, Q>) -> i64
+fn do_get_prepare_time<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
 where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
-    env.with_querier_from_context(|querier| querier.get_prepare_time())
+    env.decrease_gas_left(750_000_000)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_prepare_time()))
 }
 
 fn do_get_execute_time<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
@@ -101,6 +108,7 @@ where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
+    env.decrease_gas_left(750_000_000)?;
     env.with_querier_from_context(|querier| querier.get_execute_time())
 }
 
@@ -109,6 +117,7 @@ where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
+    env.decrease_gas_left(750_000_000)?;
     env.with_querier_from_context(|querier| querier.get_ans_count())
 }
 
@@ -129,6 +138,7 @@ where
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
+        env.decrease_gas_left(1_500_000_000 + (len as u64) * 50_000_000)?;
 
         let memory = env.memory()?;
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
@@ -150,6 +160,7 @@ where
     A: BackendApi + 'static,
     Q: Querier + 'static,
 {
+    env.decrease_gas_left(750_000_000)?;
     env.with_querier_from_context(|querier| querier.get_external_data_status(eid, vid))
 }
 
@@ -170,6 +181,7 @@ where
         require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
 
         let data = querier.get_external_data(eid, vid)?;
+        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 60_000_000)?;
 
         for (idx, byte) in data.iter().enumerate() {
             memory.view()[ptr as usize + idx].set(*byte);
@@ -203,7 +215,7 @@ where
     Q: Querier + 'static,
 {
     // consume gas relatively to the function running time (~12ms)
-    env.decrease_gas_left(3_500_000_000_000)?;
+    env.decrease_gas_left(7_500_000_000_000)?;
     let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
     let pi: Vec<u8> = get_from_mem(env, pi_ptr, pi_len)?;
     let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
@@ -470,7 +482,7 @@ mod test {
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(300, do_get_span_size(&owasm_env));
+        assert_eq!(300, do_get_span_size(&owasm_env).unwrap());
     }
 
     #[test]
@@ -503,7 +515,7 @@ mod test {
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(10, do_get_ask_count(&owasm_env));
+        assert_eq!(10, do_get_ask_count(&owasm_env).unwrap());
     }
 
     #[test]
@@ -514,7 +526,7 @@ mod test {
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(8, do_get_min_count(&owasm_env));
+        assert_eq!(8, do_get_min_count(&owasm_env).unwrap());
     }
 
     #[test]
@@ -525,7 +537,7 @@ mod test {
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(100_000, do_get_prepare_time(&owasm_env));
+        assert_eq!(100_000, do_get_prepare_time(&owasm_env).unwrap());
     }
 
     #[test]
