@@ -34,18 +34,14 @@ where
 {
     env.with_querier_from_context(|querier| {
         let span_size = querier.get_span_size();
-
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
-
         let data = querier.get_calldata()?;
-        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 30_000_000)?;
 
-        for (idx, byte) in data.iter().enumerate() {
-            memory.view()[ptr as usize + idx].set(*byte);
+        if data.len() as i64 > span_size {
+            return Err(Error::SpanTooSmallError);
         }
 
-        Ok(data.len() as i64)
+        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 30_000_000)?;
+        write_memory(env, ptr, data)
     })
 }
 
@@ -61,13 +57,7 @@ where
         }
         env.decrease_gas_left(1_500_000_000 + (len as u64) * 50_000_000)?;
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
-
-        let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize]
-            .iter()
-            .map(|cell| cell.get())
-            .collect();
+        let data: Vec<u8> = read_memory(env, ptr, len)?;
         querier.set_return_data(&data)
     })
 }
@@ -130,13 +120,7 @@ where
         }
         env.decrease_gas_left(1_500_000_000 + (len as u64) * 50_000_000)?;
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
-
-        let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize]
-            .iter()
-            .map(|cell| cell.get())
-            .collect();
+        let data: Vec<u8> = read_memory(env, ptr, len)?;
         querier.ask_external_data(eid, did, &data)
     })
 }
@@ -160,28 +144,36 @@ where
 {
     env.with_querier_from_context(|querier| {
         let span_size = querier.get_span_size();
-
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
-
         let data = querier.get_external_data(eid, vid)?;
-        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 60_000_000)?;
 
-        for (idx, byte) in data.iter().enumerate() {
-            memory.view()[ptr as usize + idx].set(*byte);
+        if data.len() as i64 > span_size {
+            return Err(Error::SpanTooSmallError);
         }
 
-        Ok(data.len() as i64)
+        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 60_000_000)?;
+        write_memory(env, ptr, data)
     })
 }
 
-fn get_from_mem<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<Vec<u8>, Error>
+fn read_memory<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<Vec<u8>, Error>
 where
     Q: Querier + 'static,
 {
     let memory = env.memory()?;
     require_mem_range(memory.size().bytes().0, (ptr + len) as usize)?;
     Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
+}
+
+fn write_memory<Q>(env: &Environment<Q>, ptr: i64, data: Vec<u8>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, (ptr + data.len() as i64) as usize)?;
+    for (idx, byte) in data.iter().enumerate() {
+        memory.view()[ptr as usize + idx].set(*byte);
+    }
+    Ok(data.len() as i64)
 }
 
 fn do_ecvrf_verify<Q>(
@@ -198,9 +190,9 @@ where
 {
     // consume gas relatively to the function running time (~12ms)
     env.decrease_gas_left(7_500_000_000_000)?;
-    let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
-    let pi: Vec<u8> = get_from_mem(env, pi_ptr, pi_len)?;
-    let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
+    let y: Vec<u8> = read_memory(env, y_ptr, y_len)?;
+    let pi: Vec<u8> = read_memory(env, pi_ptr, pi_len)?;
+    let alpha: Vec<u8> = read_memory(env, alpha_ptr, alpha_len)?;
     Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
 }
 
