@@ -2,11 +2,9 @@ use crate::error::Error;
 
 use std::borrow::Borrow;
 use std::ptr::NonNull;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use wasmer::{Instance, Memory, WasmerEnv};
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
-
-pub trait BackendApi {}
 
 pub trait Querier {
     /// Returns the maximum span size value.
@@ -46,30 +44,27 @@ impl<Q: Querier> ContextData<Q> {
 }
 
 #[derive(WasmerEnv)]
-pub struct Environment<A, Q>
+pub struct Environment<Q>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
-    pub api: Arc<Mutex<A>>,
     data: Arc<RwLock<ContextData<Q>>>,
 }
 
-impl<A: BackendApi + 'static, Q: Querier + 'static> Clone for Environment<A, Q> {
+impl<Q: Querier + 'static> Clone for Environment<Q> {
     fn clone(&self) -> Self {
-        Self { api: Arc::clone(&self.api), data: self.data.clone() }
+        Self { data: self.data.clone() }
     }
 }
-unsafe impl<A: BackendApi, Q: Querier> Send for Environment<A, Q> {}
-unsafe impl<A: BackendApi, Q: Querier> Sync for Environment<A, Q> {}
+unsafe impl<Q: Querier> Send for Environment<Q> {}
+unsafe impl<Q: Querier> Sync for Environment<Q> {}
 
-impl<A, Q> Environment<A, Q>
+impl<Q> Environment<Q>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
-    pub fn new(a: A, q: Q) -> Self {
-        Self { api: Arc::new(Mutex::new(a)), data: Arc::new(RwLock::new(ContextData::new(q))) }
+    pub fn new(q: Q) -> Self {
+        Self { data: Arc::new(RwLock::new(ContextData::new(q))) }
     }
 
     pub fn with_querier_from_context<C, R>(&self, callback: C) -> R
@@ -179,10 +174,6 @@ mod test {
 
     use super::*;
 
-    pub struct MockApi {}
-
-    impl BackendApi for MockApi {}
-
     pub struct MockQuerier {}
 
     impl Querier for MockQuerier {
@@ -240,13 +231,13 @@ mod test {
 
     #[test]
     fn test_env_querier() {
-        let env = Environment::new(MockApi {}, MockQuerier {});
+        let env = Environment::new(MockQuerier {});
         assert_eq!(300, env.with_querier_from_context(|querier| querier.get_span_size()));
     }
 
     #[test]
     fn test_env_wasmer_instance() {
-        let env = Environment::new(MockApi {}, MockQuerier {});
+        let env = Environment::new(MockQuerier {});
         assert_eq!(
             Error::UninitializedContextData,
             env.with_wasmer_instance(|_| { Ok(()) }).unwrap_err()
@@ -269,7 +260,7 @@ mod test {
 
     #[test]
     fn test_env_gas() {
-        let env = Environment::new(MockApi {}, MockQuerier {});
+        let env = Environment::new(MockQuerier {});
         let wasm = wat2wasm(
             r#"(module
                 (func $execute (export "execute"))

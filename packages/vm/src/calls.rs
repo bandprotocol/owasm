@@ -1,25 +1,23 @@
+use crate::cache::Cache;
 use crate::error::Error;
 use crate::imports::create_import_object;
 use crate::store::make_store;
 use crate::vm::{Environment, Querier};
-use crate::{cache::Cache, vm::BackendApi};
 
 use std::ptr::NonNull;
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
-pub fn run<A, Q>(
+pub fn run<Q>(
     cache: &mut Cache,
     code: &[u8],
     gas_limit: u64,
     is_prepare: bool,
-    api: A,
     querier: Q,
 ) -> Result<u64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
-    let owasm_env = Environment::new(api, querier);
+    let owasm_env = Environment::new(querier);
     let store = make_store();
     let import_object = create_import_object(&store, owasm_env.clone());
 
@@ -57,17 +55,12 @@ where
 #[cfg(test)]
 mod test {
     use crate::cache::CacheOptions;
-    use crate::vm::BackendApi;
 
     use super::*;
     use crate::compile::compile;
     use std::io::{Read, Write};
     use std::process::Command;
     use tempfile::NamedTempFile;
-
-    pub struct MockApi {}
-
-    impl BackendApi for MockApi {}
 
     pub struct MockQuerier {}
 
@@ -149,10 +142,9 @@ mod test {
         );
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let api = MockApi {};
         let querier = MockQuerier {};
-        let gas_used = run(&mut cache, &code, u64::MAX, true, api, querier).unwrap();
-        assert_eq!(gas_used, 687519375000 as u64);
+        let gas_used = run(&mut cache, &code, u64::MAX, true, querier).unwrap();
+        assert_eq!(gas_used, 705019550000 as u64);
     }
 
     #[test]
@@ -188,10 +180,9 @@ mod test {
 
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let api = MockApi {};
         let querier = MockQuerier {};
-        let gas_used = run(&mut cache, &code, u64::MAX, true, api, querier).unwrap();
-        assert_eq!(gas_used, 687524375000 as u64);
+        let gas_used = run(&mut cache, &code, u64::MAX, true, querier).unwrap();
+        assert_eq!(gas_used, 706724650000 as u64);
     }
 
     #[test]
@@ -219,9 +210,8 @@ mod test {
         );
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let api = MockApi {};
         let querier = MockQuerier {};
-        let out_of_gas_err = run(&mut cache, &code, 0, true, api, querier).unwrap_err();
+        let out_of_gas_err = run(&mut cache, &code, 0, true, querier).unwrap_err();
         assert_eq!(out_of_gas_err, Error::OutOfGasError);
     }
 }

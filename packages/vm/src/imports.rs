@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::vm::{BackendApi, Environment, Querier};
+use crate::vm::{Environment, Querier};
 
 use wasmer::{imports, Function, ImportObject, Store};
 
@@ -12,27 +12,24 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
     Ok(())
 }
 
-fn do_gas<A, Q>(env: &Environment<A, Q>, _gas: u32) -> Result<(), Error>
+fn do_gas<Q>(env: &Environment<Q>, _gas: u32) -> Result<(), Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     Ok(())
 }
 
-fn do_get_span_size<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
+fn do_get_span_size<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     Ok(env.with_querier_from_context(|querier| querier.get_span_size()))
 }
 
-fn do_read_calldata<A, Q>(env: &Environment<A, Q>, ptr: i64) -> Result<i64, Error>
+fn do_read_calldata<Q>(env: &Environment<Q>, ptr: i64) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.with_querier_from_context(|querier| {
@@ -52,9 +49,8 @@ where
     })
 }
 
-fn do_set_return_data<A, Q>(env: &Environment<A, Q>, ptr: i64, len: i64) -> Result<(), Error>
+fn do_set_return_data<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<(), Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.with_querier_from_context(|querier| {
@@ -76,60 +72,54 @@ where
     })
 }
 
-fn do_get_ask_count<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
+fn do_get_ask_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     Ok(env.with_querier_from_context(|querier| querier.get_ask_count()))
 }
 
-fn do_get_min_count<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
+fn do_get_min_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     Ok(env.with_querier_from_context(|querier| querier.get_min_count()))
 }
 
-fn do_get_prepare_time<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
+fn do_get_prepare_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     Ok(env.with_querier_from_context(|querier| querier.get_prepare_time()))
 }
 
-fn do_get_execute_time<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
+fn do_get_execute_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     env.with_querier_from_context(|querier| querier.get_execute_time())
 }
 
-fn do_get_ans_count<A, Q>(env: &Environment<A, Q>) -> Result<i64, Error>
+fn do_get_ans_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     env.with_querier_from_context(|querier| querier.get_ans_count())
 }
 
-fn do_ask_external_data<A, Q>(
-    env: &Environment<A, Q>,
+fn do_ask_external_data<Q>(
+    env: &Environment<Q>,
     eid: i64,
     did: i64,
     ptr: i64,
     len: i64,
 ) -> Result<(), Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.with_querier_from_context(|querier| {
@@ -151,27 +141,21 @@ where
     })
 }
 
-fn do_get_external_data_status<A, Q>(
-    env: &Environment<A, Q>,
-    eid: i64,
-    vid: i64,
-) -> Result<i64, Error>
+fn do_get_external_data_status<Q>(env: &Environment<Q>, eid: i64, vid: i64) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.decrease_gas_left(750_000_000)?;
     env.with_querier_from_context(|querier| querier.get_external_data_status(eid, vid))
 }
 
-fn do_read_external_data<A, Q>(
-    env: &Environment<A, Q>,
+fn do_read_external_data<Q>(
+    env: &Environment<Q>,
     eid: i64,
     vid: i64,
     ptr: i64,
 ) -> Result<i64, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     env.with_querier_from_context(|querier| {
@@ -191,9 +175,8 @@ where
     })
 }
 
-fn get_from_mem<A, Q>(env: &Environment<A, Q>, ptr: i64, len: i64) -> Result<Vec<u8>, Error>
+fn get_from_mem<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<Vec<u8>, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     let memory = env.memory()?;
@@ -201,8 +184,8 @@ where
     Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
 }
 
-fn do_ecvrf_verify<A, Q>(
-    env: &Environment<A, Q>,
+fn do_ecvrf_verify<Q>(
+    env: &Environment<Q>,
     y_ptr: i64,
     y_len: i64,
     pi_ptr: i64,
@@ -211,7 +194,6 @@ fn do_ecvrf_verify<A, Q>(
     alpha_len: i64,
 ) -> Result<u32, Error>
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     // consume gas relatively to the function running time (~12ms)
@@ -222,9 +204,8 @@ where
     Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
 }
 
-pub fn create_import_object<A, Q>(store: &Store, owasm_env: Environment<A, Q>) -> ImportObject
+pub fn create_import_object<Q>(store: &Store, owasm_env: Environment<Q>) -> ImportObject
 where
-    A: BackendApi + 'static,
     Q: Querier + 'static,
 {
     imports! {
@@ -253,7 +234,6 @@ mod test {
     use crate::cache::{Cache, CacheOptions};
     use crate::compile::compile;
     use crate::store::make_store;
-    use crate::vm::BackendApi;
 
     use std::io::{Read, Write};
     use std::process::Command;
@@ -263,10 +243,6 @@ mod test {
     use wasmer::FunctionType;
     use wasmer::Instance;
     use wasmer::ValType::{I32, I64};
-
-    pub struct MockApi {}
-
-    impl BackendApi for MockApi {}
 
     pub struct MockQuerier {}
 
@@ -323,7 +299,7 @@ mod test {
         wasm
     }
 
-    fn create_owasm_env() -> (Environment<MockApi, MockQuerier>, Instance) {
+    fn create_owasm_env() -> (Environment<MockQuerier>, Instance) {
         let wasm = wat2wasm(
             r#"(module
             (func
@@ -338,9 +314,8 @@ mod test {
         );
         let code = compile(&wasm).unwrap();
 
-        let api = MockApi {};
         let querier = MockQuerier {};
-        let owasm_env = Environment::new(api, querier);
+        let owasm_env = Environment::new(querier);
         let store = make_store();
         let import_object = create_import_object(&store, owasm_env.clone());
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
@@ -351,9 +326,8 @@ mod test {
 
     #[test]
     fn test_import_object_function_type() {
-        let api = MockApi {};
         let querier = MockQuerier {};
-        let owasm_env = Environment::new(api, querier);
+        let owasm_env = Environment::new(querier);
         let store = make_store();
         assert_eq!(create_import_object(&store, owasm_env.clone()).externs_vec().len(), 13);
 
