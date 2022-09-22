@@ -188,7 +188,7 @@ fn do_ecvrf_verify<Q>(
 where
     Q: Querier + 'static,
 {
-    // consume gas relatively to the function running time (~12ms)
+    // consume gas relatively to the function running time (~7.5ms)
     env.decrease_gas_left(7_500_000_000_000)?;
     let y: Vec<u8> = read_memory(env, y_ptr, y_len)?;
     let pi: Vec<u8> = read_memory(env, pi_ptr, pi_len)?;
