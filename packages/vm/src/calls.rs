@@ -182,7 +182,7 @@ mod test {
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let querier = MockQuerier {};
         let gas_used = run(&mut cache, &code, u64::MAX, true, querier).unwrap();
-        assert_eq!(gas_used, 706724650000 as u64);
+        assert_eq!(gas_used, 706780650000 as u64);
     }
 
     #[test]
