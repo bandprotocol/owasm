@@ -1,6 +1,6 @@
 use crate::error::Error;
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::ptr::NonNull;
 use std::sync::{Arc, RwLock};
 use wasmer::{Instance, Memory, WasmerEnv};
@@ -76,8 +76,9 @@ where
 
     /// Creates a back reference from a contact to its partent instance
     pub fn set_wasmer_instance(&self, instance: Option<NonNull<Instance>>) {
-        let mut data = self.data.as_ref().write().unwrap();
-        data.wasmer_instance = instance;
+        self.with_context_data_mut(|data| {
+            data.wasmer_instance = instance;
+        })
     }
 
     pub fn with_wasmer_instance<C, R>(&self, callback: C) -> Result<R, Error>
@@ -102,14 +103,14 @@ where
         callback(context_data)
     }
 
-    // fn with_context_data_mut<C, R>(&self, callback: C) -> R
-    // where
-    //     C: FnOnce(&mut ContextData<Q>) -> R,
-    // {
-    //     let mut guard = self.data.as_ref().write().unwrap();
-    //     let context_data = guard.borrow_mut();
-    //     callback(context_data)
-    // }
+    fn with_context_data_mut<C, R>(&self, callback: C) -> R
+    where
+        C: FnOnce(&mut ContextData<Q>) -> R,
+    {
+        let mut guard = self.data.as_ref().write().unwrap();
+        let context_data = guard.borrow_mut();
+        callback(context_data)
+    }
 
     pub fn get_gas_left(&self) -> u64 {
         self.with_wasmer_instance(|instance| {
@@ -140,8 +141,7 @@ where
     }
 
     pub fn memory(&self) -> Result<Memory, Error> {
-        let data = self.data.as_ref().read().unwrap();
-        match data.wasmer_instance {
+        self.with_context_data(|data| match data.wasmer_instance {
             Some(instance_ptr) => {
                 let instance_ref = unsafe { instance_ptr.as_ref() };
                 let mut memories: Vec<Memory> =
@@ -153,7 +153,7 @@ where
                 }
             }
             _ => Err(Error::BadMemorySectionError),
-        }
+        })
     }
 }
 
