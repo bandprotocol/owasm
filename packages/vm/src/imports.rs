@@ -55,7 +55,7 @@ where
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
-        env.decrease_gas_left(1_500_000_000 + (len as u64) * 50_000_000)?;
+        env.decrease_gas_left(1_750_000_000 + (len as u64) * 1_500_000)?;
 
         let data: Vec<u8> = read_memory(env, ptr, len)?;
         querier.set_return_data(&data)
@@ -118,7 +118,7 @@ where
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
-        env.decrease_gas_left(1_500_000_000 + (len as u64) * 50_000_000)?;
+        env.decrease_gas_left(1_750_000_000 + (len as u64) * 1_500_000)?;
 
         let data: Vec<u8> = read_memory(env, ptr, len)?;
         querier.ask_external_data(eid, did, &data)
@@ -150,7 +150,7 @@ where
             return Err(Error::SpanTooSmallError);
         }
 
-        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 60_000_000)?;
+        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 30_000_000)?;
         write_memory(env, ptr, data)
     })
 }
