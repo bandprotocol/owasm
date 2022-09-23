@@ -1,3 +1,8 @@
+use std::{
+    borrow::{BorrowMut},
+    sync::{Arc, RwLock},
+};
+
 use crate::checksum::Checksum;
 use crate::error::Error;
 
@@ -42,7 +47,7 @@ pub struct CacheOptions {
 }
 
 pub struct Cache {
-    memory_cache: InMemoryCache,
+    memory_cache: Arc<RwLock<InMemoryCache>>,
     stats: Stats,
 }
 
@@ -50,11 +55,23 @@ impl Cache {
     pub fn new(options: CacheOptions) -> Self {
         let CacheOptions { cache_size } = options;
 
-        Self { memory_cache: InMemoryCache::new(cache_size), stats: Stats::new() }
+        Self {
+            memory_cache: Arc::new(RwLock::new(InMemoryCache::new(cache_size))),
+            stats: Stats::new(),
+        }
     }
 
     pub fn stats(&self) -> &Stats {
         &self.stats
+    }
+
+    fn with_in_memory_cache<C, R>(&mut self, callback: C) -> R
+    where
+        C: FnOnce(&mut InMemoryCache, &mut Stats) -> R,
+    {
+        let mut guard = self.memory_cache.as_ref().write().unwrap();
+        let in_memory_cache = guard.borrow_mut();
+        callback(in_memory_cache, &mut self.stats)
     }
 
     pub fn get_instance(
@@ -64,22 +81,23 @@ impl Cache {
         import_object: &wasmer::ImportObject,
     ) -> Result<wasmer::Instance, Error> {
         let checksum = Checksum::generate(wasm);
-
-        // lookup cache
-        if let Some(module) = self.memory_cache.load(&checksum) {
-            self.stats.hits += 1;
-            return Ok(Instance::new(&module, &import_object).unwrap());
-        }
-        self.stats.misses += 1;
-
-        // recompile
-        let module = Module::new(store, &wasm).map_err(|_| Error::InstantiationError)?;
-        let instance =
+        self.with_in_memory_cache(|in_memory_cache, stats| {
+            // lookup cache
+            if let Some(module) = in_memory_cache.load(&checksum) {
+                stats.hits += 1;
+                return Ok(Instance::new(&module, &import_object).unwrap());
+            }
+            stats.misses += 1;
+            
+            // recompile
+            let module = Module::new(store, &wasm).map_err(|_| Error::InstantiationError)?;
+            let instance =
             Instance::new(&module, &import_object).map_err(|_| Error::InstantiationError)?;
-
-        self.memory_cache.store(&checksum, module);
-
-        Ok(instance)
+            
+            in_memory_cache.store(&checksum, module);
+            
+            Ok(instance)
+        })
     }
 }
 

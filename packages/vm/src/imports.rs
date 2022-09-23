@@ -5,154 +5,14 @@ use wasmer::{imports, Function, ImportObject, Store};
 
 use owasm_crypto::ecvrf;
 
+const IMPORTED_FUNCTION_GAS: u64 = 750_000_000;
+const ECVRF_VERIFY_GAS: u64 = 7_500_000_000_000;
+
 fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error> {
     if max_range < require_range {
         return Err(Error::MemoryOutOfBoundError);
     }
     Ok(())
-}
-
-fn do_gas<Q>(env: &Environment<Q>, _gas: u32) -> Result<(), Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    Ok(())
-}
-
-fn do_get_span_size<Q>(env: &Environment<Q>) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    Ok(env.with_querier_from_context(|querier| querier.get_span_size()))
-}
-
-fn do_read_calldata<Q>(env: &Environment<Q>, ptr: i64) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.with_querier_from_context(|querier| {
-        let span_size = querier.get_span_size();
-        let data = querier.get_calldata()?;
-
-        if data.len() as i64 > span_size {
-            return Err(Error::SpanTooSmallError);
-        }
-
-        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 30_000_000)?;
-        write_memory(env, ptr, data)
-    })
-}
-
-fn do_set_return_data<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<(), Error>
-where
-    Q: Querier + 'static,
-{
-    env.with_querier_from_context(|querier| {
-        let span_size = querier.get_span_size();
-
-        if len > span_size {
-            return Err(Error::SpanTooSmallError);
-        }
-        env.decrease_gas_left(1_750_000_000 + (len as u64) * 1_500_000)?;
-
-        let data: Vec<u8> = read_memory(env, ptr, len)?;
-        querier.set_return_data(&data)
-    })
-}
-
-fn do_get_ask_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    Ok(env.with_querier_from_context(|querier| querier.get_ask_count()))
-}
-
-fn do_get_min_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    Ok(env.with_querier_from_context(|querier| querier.get_min_count()))
-}
-
-fn do_get_prepare_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    Ok(env.with_querier_from_context(|querier| querier.get_prepare_time()))
-}
-
-fn do_get_execute_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    env.with_querier_from_context(|querier| querier.get_execute_time())
-}
-
-fn do_get_ans_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    env.with_querier_from_context(|querier| querier.get_ans_count())
-}
-
-fn do_ask_external_data<Q>(
-    env: &Environment<Q>,
-    eid: i64,
-    did: i64,
-    ptr: i64,
-    len: i64,
-) -> Result<(), Error>
-where
-    Q: Querier + 'static,
-{
-    env.with_querier_from_context(|querier| {
-        let span_size = querier.get_span_size();
-
-        if len > span_size {
-            return Err(Error::SpanTooSmallError);
-        }
-        env.decrease_gas_left(1_750_000_000 + (len as u64) * 1_500_000)?;
-
-        let data: Vec<u8> = read_memory(env, ptr, len)?;
-        querier.ask_external_data(eid, did, &data)
-    })
-}
-
-fn do_get_external_data_status<Q>(env: &Environment<Q>, eid: i64, vid: i64) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.decrease_gas_left(750_000_000)?;
-    env.with_querier_from_context(|querier| querier.get_external_data_status(eid, vid))
-}
-
-fn do_read_external_data<Q>(
-    env: &Environment<Q>,
-    eid: i64,
-    vid: i64,
-    ptr: i64,
-) -> Result<i64, Error>
-where
-    Q: Querier + 'static,
-{
-    env.with_querier_from_context(|querier| {
-        let span_size = querier.get_span_size();
-        let data = querier.get_external_data(eid, vid)?;
-
-        if data.len() as i64 > span_size {
-            return Err(Error::SpanTooSmallError);
-        }
-
-        env.decrease_gas_left(3_000_000_000 + (data.len() as u64) * 30_000_000)?;
-        write_memory(env, ptr, data)
-    })
 }
 
 fn read_memory<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<Vec<u8>, Error>
@@ -176,6 +36,157 @@ where
     Ok(data.len() as i64)
 }
 
+fn calculate_read_memory_gas(len: i64) -> u64 {
+    1_000_000_000 + (len as u64) * 1_500_000
+}
+
+fn calculate_write_memory_gas(len: usize) -> u64 {
+    2_250_000_000 + (len as u64) * 30_000_000
+}
+
+fn do_gas<Q>(env: &Environment<Q>, _gas: u32) -> Result<(), Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(())
+}
+
+fn do_get_span_size<Q>(env: &Environment<Q>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_span_size()))
+}
+
+fn do_read_calldata<Q>(env: &Environment<Q>, ptr: i64) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
+        let data = querier.get_calldata()?;
+
+        if data.len() as i64 > span_size {
+            return Err(Error::SpanTooSmallError);
+        }
+
+        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_write_memory_gas(data.len()))?;
+        write_memory(env, ptr, data)
+    })
+}
+
+fn do_set_return_data<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<(), Error>
+where
+    Q: Querier + 'static,
+{
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
+
+        if len > span_size {
+            return Err(Error::SpanTooSmallError);
+        }
+        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_read_memory_gas(len))?;
+
+        let data: Vec<u8> = read_memory(env, ptr, len)?;
+        querier.set_return_data(&data)
+    })
+}
+
+fn do_get_ask_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_ask_count()))
+}
+
+fn do_get_min_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_min_count()))
+}
+
+fn do_get_prepare_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_prepare_time()))
+}
+
+fn do_get_execute_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    env.with_querier_from_context(|querier| querier.get_execute_time())
+}
+
+fn do_get_ans_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    env.with_querier_from_context(|querier| querier.get_ans_count())
+}
+
+fn do_ask_external_data<Q>(
+    env: &Environment<Q>,
+    eid: i64,
+    did: i64,
+    ptr: i64,
+    len: i64,
+) -> Result<(), Error>
+where
+    Q: Querier + 'static,
+{
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
+
+        if len > span_size {
+            return Err(Error::SpanTooSmallError);
+        }
+        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_read_memory_gas(len))?;
+
+        let data: Vec<u8> = read_memory(env, ptr, len)?;
+        querier.ask_external_data(eid, did, &data)
+    })
+}
+
+fn do_get_external_data_status<Q>(env: &Environment<Q>, eid: i64, vid: i64) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    env.with_querier_from_context(|querier| querier.get_external_data_status(eid, vid))
+}
+
+fn do_read_external_data<Q>(
+    env: &Environment<Q>,
+    eid: i64,
+    vid: i64,
+    ptr: i64,
+) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
+        let data = querier.get_external_data(eid, vid)?;
+
+        if data.len() as i64 > span_size {
+            return Err(Error::SpanTooSmallError);
+        }
+
+        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_write_memory_gas(data.len()))?;
+        write_memory(env, ptr, data)
+    })
+}
+
 fn do_ecvrf_verify<Q>(
     env: &Environment<Q>,
     y_ptr: i64,
@@ -189,7 +200,7 @@ where
     Q: Querier + 'static,
 {
     // consume gas relatively to the function running time (~7.5ms)
-    env.decrease_gas_left(7_500_000_000_000)?;
+    env.decrease_gas_left(ECVRF_VERIFY_GAS)?;
     let y: Vec<u8> = read_memory(env, y_ptr, y_len)?;
     let pi: Vec<u8> = read_memory(env, pi_ptr, pi_len)?;
     let alpha: Vec<u8> = read_memory(env, alpha_ptr, alpha_len)?;
