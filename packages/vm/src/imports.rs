@@ -322,7 +322,7 @@ mod test {
         let store = make_store();
         let import_object = create_import_object(&store, owasm_env.clone());
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let instance = cache.get_instance(&code, &store, &import_object).unwrap();
+        let (instance, _) = cache.get_instance(&code, &store, &import_object).unwrap();
 
         return (owasm_env, instance);
     }

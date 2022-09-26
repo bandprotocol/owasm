@@ -253,7 +253,7 @@ mod test {
         let store = Store::new(&Universal::new(compiler).engine());
         let import_object = imports! {};
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let instance = cache.get_instance(&wasm, &store, &import_object).unwrap();
+        let (instance, _) = cache.get_instance(&wasm, &store, &import_object).unwrap();
         env.set_wasmer_instance(Some(NonNull::from(&instance)));
         assert_eq!(Ok(()), env.with_wasmer_instance(|_| { Ok(()) }));
     }
@@ -270,7 +270,7 @@ mod test {
         let store = make_store();
         let import_object = imports! {};
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let instance = cache.get_instance(&wasm, &store, &import_object).unwrap();
+        let (instance, _) = cache.get_instance(&wasm, &store, &import_object).unwrap();
         env.set_wasmer_instance(Some(NonNull::from(&instance)));
 
         assert_eq!(0, env.get_gas_left());

@@ -21,7 +21,7 @@ where
     let store = make_store();
     let import_object = create_import_object(&store, owasm_env.clone());
 
-    let instance = cache.get_instance(code, &store, &import_object)?;
+    let (instance, _) = cache.get_instance(code, &store, &import_object)?;
     let instance_ptr = NonNull::from(&instance);
     owasm_env.set_wasmer_instance(Some(instance_ptr));
     owasm_env.set_gas_left(gas_limit);
