@@ -20,8 +20,11 @@ where
     Q: Querier + 'static,
 {
     let memory = env.memory()?;
-    require_mem_range(memory.size().bytes().0, (ptr + len) as usize)?;
-    Ok(memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect())
+    require_mem_range(memory.size().bytes().0, (ptr.saturating_add(len)) as usize)?;
+    Ok(memory.view()[ptr as usize..(ptr.saturating_add(len)) as usize]
+        .iter()
+        .map(|cell| cell.get())
+        .collect())
 }
 
 fn write_memory<Q>(env: &Environment<Q>, ptr: i64, data: Vec<u8>) -> Result<i64, Error>
@@ -29,19 +32,19 @@ where
     Q: Querier + 'static,
 {
     let memory = env.memory()?;
-    require_mem_range(memory.size().bytes().0, (ptr + data.len() as i64) as usize)?;
+    require_mem_range(memory.size().bytes().0, (ptr.saturating_add(data.len() as i64)) as usize)?;
     for (idx, byte) in data.iter().enumerate() {
-        memory.view()[ptr as usize + idx].set(*byte);
+        memory.view()[(ptr as usize).saturating_add(idx)].set(*byte);
     }
     Ok(data.len() as i64)
 }
 
 fn calculate_read_memory_gas(len: i64) -> u64 {
-    1_000_000_000 + (len as u64) * 1_500_000
+    1_000_000_000_u64.saturating_add((len as u64).saturating_mul(1_500_000))
 }
 
 fn calculate_write_memory_gas(len: usize) -> u64 {
-    2_250_000_000 + (len as u64) * 30_000_000
+    2_250_000_000_u64.saturating_add((len as u64).saturating_mul(30_000_000))
 }
 
 fn do_gas<Q>(env: &Environment<Q>, _gas: u32) -> Result<(), Error>
@@ -72,7 +75,9 @@ where
             return Err(Error::SpanTooSmallError);
         }
 
-        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_write_memory_gas(data.len()))?;
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(data.len())),
+        )?;
         write_memory(env, ptr, data)
     })
 }
@@ -81,13 +86,18 @@ fn do_set_return_data<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<(),
 where
     Q: Querier + 'static,
 {
+    if len < 0 {
+        return Err(Error::DataLengthOutOfBound);
+    }
     env.with_querier_from_context(|querier| {
         let span_size = querier.get_span_size();
 
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
-        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_read_memory_gas(len))?;
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(len)),
+        )?;
 
         let data: Vec<u8> = read_memory(env, ptr, len)?;
         querier.set_return_data(&data)
@@ -144,13 +154,18 @@ fn do_ask_external_data<Q>(
 where
     Q: Querier + 'static,
 {
+    if len < 0 {
+        return Err(Error::DataLengthOutOfBound);
+    }
     env.with_querier_from_context(|querier| {
         let span_size = querier.get_span_size();
 
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
-        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_read_memory_gas(len))?;
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(len)),
+        )?;
 
         let data: Vec<u8> = read_memory(env, ptr, len)?;
         querier.ask_external_data(eid, did, &data)
@@ -182,7 +197,9 @@ where
             return Err(Error::SpanTooSmallError);
         }
 
-        env.decrease_gas_left(IMPORTED_FUNCTION_GAS + calculate_write_memory_gas(data.len()))?;
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(data.len())),
+        )?;
         write_memory(env, ptr, data)
     })
 }
