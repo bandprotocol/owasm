@@ -19,8 +19,11 @@ fn read_memory<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<Vec<u8>, E
 where
     Q: Querier + 'static,
 {
+    if ptr < 0 {
+        return Err(Error::MemoryOutOfBoundError);
+    }
     let memory = env.memory()?;
-    require_mem_range(memory.size().bytes().0, (ptr.saturating_add(len)) as usize)?;
+    require_mem_range(memory.size().bytes().0, (ptr as usize).saturating_add(len as usize))?;
     Ok(memory.view()[ptr as usize..(ptr.saturating_add(len)) as usize]
         .iter()
         .map(|cell| cell.get())
@@ -31,8 +34,11 @@ fn write_memory<Q>(env: &Environment<Q>, ptr: i64, data: Vec<u8>) -> Result<i64,
 where
     Q: Querier + 'static,
 {
+    if ptr < 0 {
+        return Err(Error::MemoryOutOfBoundError);
+    }
     let memory = env.memory()?;
-    require_mem_range(memory.size().bytes().0, (ptr.saturating_add(data.len() as i64)) as usize)?;
+    require_mem_range(memory.size().bytes().0, (ptr as usize).saturating_add(data.len() as usize))?;
     for (idx, byte) in data.iter().enumerate() {
         memory.view()[(ptr as usize).saturating_add(idx)].set(*byte);
     }
@@ -459,46 +465,104 @@ mod test {
 
     #[test]
     fn test_do_gas() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
         assert_eq!(Ok(()), do_gas(&owasm_env, 0));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Ok(()), do_gas(&owasm_env, u32::MAX));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_span_size() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
         assert_eq!(300, do_get_span_size(&owasm_env).unwrap());
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_read_calldata() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
         assert_eq!(1, do_read_calldata(&owasm_env, 0).unwrap());
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, -1));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, 6553600));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, i64::MAX));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, i64::MIN));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_set_return_data() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(Ok(()), do_set_return_data(&owasm_env, 0, 0))
+        assert_eq!(Ok(()), do_set_return_data(&owasm_env, 0, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_set_return_data(&owasm_env, -1, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_set_return_data(&owasm_env, i64::MAX, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_set_return_data(&owasm_env, i64::MIN, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::DataLengthOutOfBound), do_set_return_data(&owasm_env, 0, -1));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::SpanTooSmallError), do_set_return_data(&owasm_env, 0, i64::MAX));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::DataLengthOutOfBound), do_set_return_data(&owasm_env, 0, i64::MIN));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
