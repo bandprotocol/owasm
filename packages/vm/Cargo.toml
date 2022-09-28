@@ -1,6 +1,6 @@
 [package]
 name = "owasm-vm"
-version = "0.1.12"
+version = "0.1.13"
 authors = ["Band Protocol <connect@bandprotocol.com>"]
 edition = "2018"
 license = "Apache-2.0"
