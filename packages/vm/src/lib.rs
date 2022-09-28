@@ -166,7 +166,7 @@ where
                     vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory()?;
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+                    require_mem_range(memory.size().bytes().0, (ptr as usize).saturating_add(span_size as usize))?;
 
                     let data = vm.env.get_calldata()?;
 
@@ -189,7 +189,7 @@ where
                     vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory()?;
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+                    require_mem_range(memory.size().bytes().0, (ptr as usize).saturating_add(span_size as usize))?;
 
                     let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
                     vm.env.set_return_data(&data)
@@ -232,7 +232,7 @@ where
                     vm.consume_gas(span_size  as u32)?;
 
                     let memory = env.memory()?;
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+                    require_mem_range(memory.size().bytes().0, (ptr as usize).saturating_add(span_size as usize))?;
 
                     let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize].iter().map(|cell| cell.get()).collect();
                     vm.env.ask_external_data(eid, did, &data)
@@ -250,7 +250,7 @@ where
                     vm.consume_gas(span_size  as u32)?;
 
                     let memory = env.memory()?;
-                    require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+                    require_mem_range(memory.size().bytes().0, (ptr as usize).saturating_add(span_size as usize))?;
 
                     let data = vm.env.get_external_data(eid, vid)?;
 
