@@ -166,13 +166,13 @@ where
                     vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory()?;
-                    let last = ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)?;
-                    require_mem_range(memory.size().bytes().0, last as usize)?;
+                    require_mem_range(memory.size().bytes().0, ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)? as usize)?;
 
                     let data = vm.env.get_calldata()?;
 
                     for (idx, byte) in data.iter().enumerate() {
-                        memory.view().get((ptr as usize).checked_add(idx).ok_or(Error::MemoryOutOfBoundError)?).ok_or(Error::MemoryOutOfBoundError)?.set(*byte);
+                        let current = (ptr as usize).checked_add(idx).ok_or(Error::MemoryOutOfBoundError)?;
+                        memory.view().get(current).ok_or(Error::MemoryOutOfBoundError)?.set(*byte);
                     }
 
                     Ok(data.len() as i64)
@@ -190,10 +190,9 @@ where
                     vm.consume_gas(span_size as u32)?;
 
                     let memory = env.memory()?;
-                    let last = ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)?;
-                    require_mem_range(memory.size().bytes().0, last as usize)?;
+                    require_mem_range(memory.size().bytes().0, ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)? as usize)?;
 
-                    let data: Vec<u8> = memory.view().get(ptr as usize..last as usize).ok_or(Error::MemoryOutOfBoundError)?.into_iter().map(|cell| cell.get()).collect();
+                    let data: Vec<u8> = memory.view().get(ptr as usize..ptr.checked_add(len).ok_or(Error::MemoryOutOfBoundError)? as usize).ok_or(Error::MemoryOutOfBoundError)?.iter().map(|cell| cell.get()).collect();
 
                     vm.env.set_return_data(&data)
                 })
@@ -236,10 +235,9 @@ where
 
                     let memory = env.memory()?;
 
-                    let last = ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)?;
-                    require_mem_range(memory.size().bytes().0, last as usize)?;
+                    require_mem_range(memory.size().bytes().0, ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)? as usize)?;
 
-                    let data: Vec<u8> = memory.view().get(ptr as usize..last as usize).ok_or(Error::MemoryOutOfBoundError)?.into_iter().map(|cell| cell.get()).collect();
+                    let data: Vec<u8> = memory.view().get(ptr as usize..ptr.checked_add(len).ok_or(Error::MemoryOutOfBoundError)? as usize).ok_or(Error::MemoryOutOfBoundError)?.iter().map(|cell| cell.get()).collect();
 
                     vm.env.ask_external_data(eid, did, &data)
                 })
@@ -257,13 +255,13 @@ where
 
                     let memory = env.memory()?;
 
-                    let last = ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)?;
-                    require_mem_range(memory.size().bytes().0, last as usize)?;
+                    require_mem_range(memory.size().bytes().0, ptr.checked_add(span_size).ok_or(Error::MemoryOutOfBoundError)? as usize)?;
 
                     let data = vm.env.get_external_data(eid, vid)?;
 
                     for (idx, byte) in data.iter().enumerate() {
-                        memory.view().get((ptr as usize).checked_add(idx).ok_or(Error::MemoryOutOfBoundError)?).ok_or(Error::MemoryOutOfBoundError)?.set(*byte);
+                        let current = (ptr as usize).checked_add(idx).ok_or(Error::MemoryOutOfBoundError)?;
+                        memory.view().get(current).ok_or(Error::MemoryOutOfBoundError)?.set(*byte);
                     }
 
                     Ok(data.len() as i64)
