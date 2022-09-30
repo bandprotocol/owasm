@@ -36,7 +36,10 @@ where
     }
     let memory = env.memory()?;
     require_mem_range(memory.size().bytes().0, safe_add(ptr, len)?)?;
-    Ok(memory.view()[safe_convert(ptr)?..safe_add(ptr, len)?]
+    Ok(memory
+        .view()
+        .get(safe_convert(ptr)?..safe_add(ptr, len)?)
+        .ok_or(Error::MemoryOutOfBoundError)?
         .iter()
         .map(|cell| cell.get())
         .collect())
@@ -52,7 +55,11 @@ where
     let memory = env.memory()?;
     require_mem_range(memory.size().bytes().0, safe_add(ptr, safe_convert(data.len())?)?)?;
     for (idx, byte) in data.iter().enumerate() {
-        memory.view()[safe_add(ptr, safe_convert(idx)?)?].set(*byte);
+        memory
+            .view()
+            .get(safe_add(ptr, safe_convert(idx)?)?)
+            .ok_or(Error::MemoryOutOfBoundError)?
+            .set(*byte);
     }
     Ok(safe_convert(data.len())?)
 }
