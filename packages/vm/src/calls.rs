@@ -2,26 +2,26 @@ use crate::cache::Cache;
 use crate::error::Error;
 use crate::imports::create_import_object;
 use crate::store::make_store;
-use crate::vm::{Env, Environment};
+use crate::vm::{Environment, Querier};
 
 use std::ptr::NonNull;
 use wasmer_middlewares::metering::{get_remaining_points, MeteringPoints};
 
-pub fn run<E>(
+pub fn run<Q>(
     cache: &mut Cache,
     code: &[u8],
     gas_limit: u64,
     is_prepare: bool,
-    env: E,
+    querier: Q,
 ) -> Result<u64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    let owasm_env = Environment::new(env);
+    let owasm_env = Environment::new(querier);
     let store = make_store();
     let import_object = create_import_object(&store, owasm_env.clone());
 
-    let instance = cache.get_instance(code, &store, &import_object)?;
+    let (instance, _) = cache.get_instance(code, &store, &import_object)?;
     let instance_ptr = NonNull::from(&instance);
     owasm_env.set_wasmer_instance(Some(instance_ptr));
     owasm_env.set_gas_left(gas_limit);
@@ -37,7 +37,7 @@ where
 
     function.call().map_err(|runtime_err| {
         if let Ok(err) = runtime_err.downcast::<Error>() {
-            return err.clone();
+            return err;
         }
 
         match get_remaining_points(&instance) {
@@ -62,9 +62,9 @@ mod test {
     use std::process::Command;
     use tempfile::NamedTempFile;
 
-    pub struct MockEnv {}
+    pub struct MockQuerier {}
 
-    impl Env for MockEnv {
+    impl Querier for MockQuerier {
         fn get_span_size(&self) -> i64 {
             300
         }
@@ -142,13 +142,13 @@ mod test {
         );
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let env = MockEnv {};
-        let gas_used = run(&mut cache, &code, u64::MAX, true, env).unwrap();
-        assert_eq!(gas_used, 2000032500000 as u64);
+        let querier = MockQuerier {};
+        let gas_used = run(&mut cache, &code, u64::MAX, true, querier).unwrap();
+        assert_eq!(gas_used, 705019550000 as u64);
     }
 
     #[test]
-    fn test_ask_count_gas_used() {
+    fn test_ask_external_data_gas_used() {
         let wasm = wat2wasm(
             r#"(module
                 (type (func (param i64 i64 i64 i64) (result)))
@@ -180,9 +180,9 @@ mod test {
 
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let env = MockEnv {};
-        let gas_used = run(&mut cache, &code, u64::MAX, true, env).unwrap();
-        assert_eq!(gas_used, 2000045000000 as u64);
+        let querier = MockQuerier {};
+        let gas_used = run(&mut cache, &code, u64::MAX, true, querier).unwrap();
+        assert_eq!(gas_used, 706780650000 as u64);
     }
 
     #[test]
@@ -210,8 +210,8 @@ mod test {
         );
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let env = MockEnv {};
-        let out_of_gas_err = run(&mut cache, &code, 0, true, env).unwrap_err();
+        let querier = MockQuerier {};
+        let out_of_gas_err = run(&mut cache, &code, 10, true, querier).unwrap_err();
         assert_eq!(out_of_gas_err, Error::OutOfGasError);
     }
 }

@@ -1,20 +1,13 @@
+use std::{
+    borrow::BorrowMut,
+    sync::{Arc, RwLock},
+};
+
 use crate::checksum::Checksum;
 use crate::error::Error;
 
 use clru::CLruCache;
 use wasmer::{Instance, Module, Store};
-
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub struct Stats {
-    pub hits: u32,
-    pub misses: u32,
-}
-
-impl Stats {
-    pub fn new() -> Self {
-        Self { hits: 0, misses: 0 }
-    }
-}
 
 /// An in-memory module cache
 pub struct InMemoryCache {
@@ -32,7 +25,7 @@ impl InMemoryCache {
 
     /// Looks up a module in the cache and creates a new module
     pub fn load(&mut self, checksum: &Checksum) -> Option<Module> {
-        self.modules.get(checksum).map(|m| m.clone())
+        self.modules.get(checksum).cloned()
     }
 }
 
@@ -42,19 +35,23 @@ pub struct CacheOptions {
 }
 
 pub struct Cache {
-    memory_cache: InMemoryCache,
-    stats: Stats,
+    memory_cache: Arc<RwLock<InMemoryCache>>,
 }
 
 impl Cache {
     pub fn new(options: CacheOptions) -> Self {
         let CacheOptions { cache_size } = options;
 
-        Self { memory_cache: InMemoryCache::new(cache_size), stats: Stats::new() }
+        Self { memory_cache: Arc::new(RwLock::new(InMemoryCache::new(cache_size))) }
     }
 
-    pub fn stats(&self) -> &Stats {
-        &self.stats
+    fn with_in_memory_cache<C, R>(&mut self, callback: C) -> R
+    where
+        C: FnOnce(&mut InMemoryCache) -> R,
+    {
+        let mut guard = self.memory_cache.as_ref().write().unwrap();
+        let in_memory_cache = guard.borrow_mut();
+        callback(in_memory_cache)
     }
 
     pub fn get_instance(
@@ -62,24 +59,23 @@ impl Cache {
         wasm: &[u8],
         store: &Store,
         import_object: &wasmer::ImportObject,
-    ) -> Result<wasmer::Instance, Error> {
+    ) -> Result<(wasmer::Instance, bool), Error> {
         let checksum = Checksum::generate(wasm);
+        self.with_in_memory_cache(|in_memory_cache| {
+            // lookup cache
+            if let Some(module) = in_memory_cache.load(&checksum) {
+                return Ok((Instance::new(&module, &import_object).unwrap(), true));
+            }
 
-        // lookup cache
-        if let Some(module) = self.memory_cache.load(&checksum) {
-            self.stats.hits += 1;
-            return Ok(Instance::new(&module, &import_object).unwrap());
-        }
-        self.stats.misses += 1;
+            // recompile
+            let module = Module::new(store, &wasm).map_err(|_| Error::InstantiationError)?;
+            let instance =
+                Instance::new(&module, &import_object).map_err(|_| Error::InstantiationError)?;
 
-        // recompile
-        let module = Module::new(store, &wasm).map_err(|_| Error::InstantiationError)?;
-        let instance =
-            Instance::new(&module, &import_object).map_err(|_| Error::InstantiationError)?;
+            in_memory_cache.store(&checksum, module);
 
-        self.memory_cache.store(&checksum, module);
-
-        Ok(instance)
+            Ok((instance, false))
+        })
     }
 }
 
@@ -108,19 +104,19 @@ mod test {
         wasm
     }
 
-    fn get_instance_without_err(cache: &mut Cache, wasm: &[u8]) -> wasmer::Instance {
+    fn get_instance_without_err(cache: &mut Cache, wasm: &[u8]) -> (wasmer::Instance, bool) {
         let compiler = Singlepass::new();
         let store = Store::new(&Universal::new(compiler).engine());
         let import_object = imports! {};
 
         match cache.get_instance(&wasm, &store, &import_object) {
-            Ok(instance) => instance,
+            Ok((instance, is_hit)) => (instance, is_hit),
             Err(_) => panic!("Fail to get instance"),
         }
     }
 
     #[test]
-    fn test_catch() {
+    fn test_cache_catch() {
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let wasm = wat2wasm(
             r#"(module
@@ -137,14 +133,20 @@ mod test {
               )"#,
         );
 
-        let instance1 = get_instance_without_err(&mut cache, &wasm);
-        assert_eq!(&Stats { hits: 0, misses: 1 }, cache.stats());
+        let (instance1, is_hit) = get_instance_without_err(&mut cache, &wasm);
+        assert_eq!(false, is_hit);
 
-        let instance2 = get_instance_without_err(&mut cache, &wasm);
-        assert_eq!(&Stats { hits: 1, misses: 1 }, cache.stats());
+        let (instance2, is_hit) = get_instance_without_err(&mut cache, &wasm);
+        assert_eq!(true, is_hit);
 
-        get_instance_without_err(&mut cache, &wasm2);
-        assert_eq!(&Stats { hits: 1, misses: 2 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm2);
+        assert_eq!(false, is_hit);
+
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm);
+        assert_eq!(true, is_hit);
+
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm2);
+        assert_eq!(true, is_hit);
 
         let ser1 = match instance1.module().serialize() {
             Ok(r) => r,
@@ -160,7 +162,7 @@ mod test {
     }
 
     #[test]
-    fn test_lru_catch() {
+    fn test_cache_size() {
         let mut cache = Cache::new(CacheOptions { cache_size: 2 });
         let wasm1 = wat2wasm(
             r#"(module
@@ -187,31 +189,39 @@ mod test {
         );
 
         // miss [_ _] => [1 _]
-        get_instance_without_err(&mut cache, &wasm1);
-        assert_eq!(&Stats { hits: 0, misses: 1 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm1);
+        assert_eq!(false, is_hit);
 
         // miss [1 _] => [2 1]
-        get_instance_without_err(&mut cache, &wasm2);
-        assert_eq!(&Stats { hits: 0, misses: 2 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm2);
+        assert_eq!(false, is_hit);
 
         // miss [2 1] => [3 2]
-        get_instance_without_err(&mut cache, &wasm3);
-        assert_eq!(&Stats { hits: 0, misses: 3 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm3);
+        assert_eq!(false, is_hit);
 
         // hit [3 2] => [2 3]
-        get_instance_without_err(&mut cache, &wasm2);
-        assert_eq!(&Stats { hits: 1, misses: 3 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm2);
+        assert_eq!(true, is_hit);
 
         // miss [2 3] => [1 2]
-        get_instance_without_err(&mut cache, &wasm1);
-        assert_eq!(&Stats { hits: 1, misses: 4 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm1);
+        assert_eq!(false, is_hit);
 
         // hit [1 2] => [2 1]
-        get_instance_without_err(&mut cache, &wasm2);
-        assert_eq!(&Stats { hits: 2, misses: 4 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm2);
+        assert_eq!(true, is_hit);
 
         // miss [2 1] => [3 2]
-        get_instance_without_err(&mut cache, &wasm3);
-        assert_eq!(&Stats { hits: 2, misses: 5 }, cache.stats());
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm3);
+        assert_eq!(false, is_hit);
+
+        cache = Cache::new(CacheOptions { cache_size: 0 });
+
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm1);
+        assert_eq!(false, is_hit);
+
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm1);
+        assert_eq!(false, is_hit);
     }
 }

@@ -1,9 +1,13 @@
 use crate::error::Error;
-use crate::vm::{Env, Environment};
+use crate::vm::{Environment, Querier};
 
 use wasmer::{imports, Function, ImportObject, Store};
 
-// use owasm_crypto::ecvrf;
+use owasm_crypto::ecvrf;
+use owasm_crypto::error::CryptoError;
+
+const IMPORTED_FUNCTION_GAS: u64 = 750_000_000;
+const ECVRF_VERIFY_GAS: u64 = 7_500_000_000_000;
 
 fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error> {
     if max_range < require_range {
@@ -12,198 +16,279 @@ fn require_mem_range(max_range: usize, require_range: usize) -> Result<(), Error
     Ok(())
 }
 
-fn do_gas<E>(env: &Environment<E>, _gas: u32) -> Result<(), Error>
+fn safe_convert<M, N>(a: M) -> Result<N, Error>
 where
-    E: Env + 'static,
+    M: TryInto<N>,
 {
-    env.decrease_gas_left(12500000)
+    a.try_into().map_err(|_| Error::ConvertTypeOutOfBound)
 }
 
-fn do_get_span_size<E>(env: &Environment<E>) -> i64
-where
-    E: Env + 'static,
-{
-    env.with_vm(|vm| vm.env.get_span_size())
+fn safe_add(a: i64, b: i64) -> Result<usize, Error> {
+    (safe_convert::<_, usize>(a)?).checked_add(safe_convert(b)?).ok_or(Error::MemoryOutOfBoundError)
 }
 
-fn do_read_calldata<E>(env: &Environment<E>, ptr: i64) -> Result<i64, Error>
+fn read_memory<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<Vec<u8>, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| -> Result<i64, Error> {
-        let span_size = vm.env.get_span_size();
+    if ptr < 0 {
+        return Err(Error::MemoryOutOfBoundError);
+    }
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, safe_add(ptr, len)?)?;
+    Ok(memory
+        .view()
+        .get(safe_convert(ptr)?..safe_add(ptr, len)?)
+        .ok_or(Error::MemoryOutOfBoundError)?
+        .iter()
+        .map(|cell| cell.get())
+        .collect())
+}
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
+fn write_memory<Q>(env: &Environment<Q>, ptr: i64, data: Vec<u8>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    if ptr < 0 {
+        return Err(Error::MemoryOutOfBoundError);
+    }
+    let memory = env.memory()?;
+    require_mem_range(memory.size().bytes().0, safe_add(ptr, safe_convert(data.len())?)?)?;
+    for (idx, byte) in data.iter().enumerate() {
+        memory
+            .view()
+            .get(safe_add(ptr, safe_convert(idx)?)?)
+            .ok_or(Error::MemoryOutOfBoundError)?
+            .set(*byte);
+    }
+    Ok(safe_convert(data.len())?)
+}
 
-        let data = vm.env.get_calldata()?;
+fn calculate_read_memory_gas(len: i64) -> u64 {
+    1_000_000_000_u64.saturating_add((len as u64).saturating_mul(1_500_000))
+}
 
-        for (idx, byte) in data.iter().enumerate() {
-            memory.view()[ptr as usize + idx].set(*byte);
+fn calculate_write_memory_gas(len: usize) -> u64 {
+    2_250_000_000_u64.saturating_add((len as u64).saturating_mul(30_000_000))
+}
+
+fn do_gas<Q>(env: &Environment<Q>, _gas: u32) -> Result<(), Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(())
+}
+
+fn do_get_span_size<Q>(env: &Environment<Q>) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_span_size()))
+}
+
+fn do_read_calldata<Q>(env: &Environment<Q>, ptr: i64) -> Result<i64, Error>
+where
+    Q: Querier + 'static,
+{
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
+        let data = querier.get_calldata()?;
+
+        if safe_convert::<_, i64>(data.len())? > span_size {
+            return Err(Error::SpanTooSmallError);
         }
 
-        Ok(data.len() as i64)
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(data.len())),
+        )?;
+        write_memory(env, ptr, data)
     })
 }
 
-fn do_set_return_data<E>(env: &Environment<E>, ptr: i64, len: i64) -> Result<(), Error>
+fn do_set_return_data<Q>(env: &Environment<Q>, ptr: i64, len: i64) -> Result<(), Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| {
-        let span_size = vm.env.get_span_size();
+    if len < 0 {
+        return Err(Error::DataLengthOutOfBound);
+    }
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
 
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(len)),
+        )?;
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
-
-        let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize]
-            .iter()
-            .map(|cell| cell.get())
-            .collect();
-        vm.env.set_return_data(&data)
+        let data: Vec<u8> = read_memory(env, ptr, len)?;
+        querier.set_return_data(&data)
     })
 }
 
-fn do_get_ask_count<E>(env: &Environment<E>) -> i64
+fn do_get_ask_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_ask_count())
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_ask_count()))
 }
 
-fn do_get_min_count<E>(env: &Environment<E>) -> i64
+fn do_get_min_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_min_count())
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_min_count()))
 }
 
-fn do_get_prepare_time<E>(env: &Environment<E>) -> i64
+fn do_get_prepare_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_prepare_time())
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    Ok(env.with_querier_from_context(|querier| querier.get_prepare_time()))
 }
 
-fn do_get_execute_time<E>(env: &Environment<E>) -> Result<i64, Error>
+fn do_get_execute_time<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_execute_time())
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    env.with_querier_from_context(|querier| querier.get_execute_time())
 }
 
-fn do_get_ans_count<E>(env: &Environment<E>) -> Result<i64, Error>
+fn do_get_ans_count<Q>(env: &Environment<Q>) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_ans_count())
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    env.with_querier_from_context(|querier| querier.get_ans_count())
 }
 
-fn do_ask_external_data<E>(
-    env: &Environment<E>,
+fn do_ask_external_data<Q>(
+    env: &Environment<Q>,
     eid: i64,
     did: i64,
     ptr: i64,
     len: i64,
 ) -> Result<(), Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| {
-        let span_size = vm.env.get_span_size();
+    if len < 0 {
+        return Err(Error::DataLengthOutOfBound);
+    }
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
 
         if len > span_size {
             return Err(Error::SpanTooSmallError);
         }
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(len)),
+        )?;
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
-
-        let data: Vec<u8> = memory.view()[ptr as usize..(ptr + len) as usize]
-            .iter()
-            .map(|cell| cell.get())
-            .collect();
-        vm.env.ask_external_data(eid, did, &data)
+        let data: Vec<u8> = read_memory(env, ptr, len)?;
+        querier.ask_external_data(eid, did, &data)
     })
 }
 
-fn do_get_external_data_status<E>(env: &Environment<E>, eid: i64, vid: i64) -> Result<i64, Error>
+fn do_get_external_data_status<Q>(env: &Environment<Q>, eid: i64, vid: i64) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_vm(|vm| vm.env.get_external_data_status(eid, vid))
+    env.decrease_gas_left(IMPORTED_FUNCTION_GAS)?;
+    env.with_querier_from_context(|querier| querier.get_external_data_status(eid, vid))
 }
 
-fn do_read_external_data<E>(
-    env: &Environment<E>,
+fn do_read_external_data<Q>(
+    env: &Environment<Q>,
     eid: i64,
     vid: i64,
     ptr: i64,
 ) -> Result<i64, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    env.with_mut_vm(|vm| -> Result<i64, Error> {
-        let span_size = vm.env.get_span_size();
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
+        let data = querier.get_external_data(eid, vid)?;
 
-        let memory = env.memory()?;
-        require_mem_range(memory.size().bytes().0, (ptr + span_size) as usize)?;
-
-        let data = vm.env.get_external_data(eid, vid)?;
-
-        for (idx, byte) in data.iter().enumerate() {
-            memory.view()[ptr as usize + idx].set(*byte);
+        if safe_convert::<_, i64>(data.len())? > span_size {
+            return Err(Error::SpanTooSmallError);
         }
 
-        Ok(data.len() as i64)
+        env.decrease_gas_left(
+            IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(data.len())),
+        )?;
+        write_memory(env, ptr, data)
     })
 }
 
-// fn do_ecvrf_verify<E>(
-//     env: &Environment<E>,
-//     y_ptr: i64,
-//     y_len: i64,
-//     pi_ptr: i64,
-//     pi_len: i64,
-//     alpha_ptr: i64,
-//     alpha_len: i64,
-// ) -> Result<u32, Error>
-// where
-//     E: Env + 'static,
-// {
-//     env.with_mut_vm(|vm| -> Result<u32, Error> {
-//         // consume gas relatively to the function running time (~12ms)
-
-//         let y: Vec<u8> = get_from_mem(env, y_ptr, y_len)?;
-//         let pi: Vec<u8> = get_from_mem(env, pi_ptr, pi_len)?;
-//         let alpha: Vec<u8> = get_from_mem(env, alpha_ptr, alpha_len)?;
-//         Ok(ecvrf::ecvrf_verify(&y, &pi, &alpha) as u32)
-//     })
-// }
-
-pub fn create_import_object<E>(store: &Store, owasm_env: Environment<E>) -> ImportObject
+fn do_ecvrf_verify<Q>(
+    env: &Environment<Q>,
+    y_ptr: i64,
+    y_len: i64,
+    pi_ptr: i64,
+    pi_len: i64,
+    alpha_ptr: i64,
+    alpha_len: i64,
+) -> Result<u32, Error>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
+{
+    if y_len < 0 || pi_len < 0 || alpha_len < 0 {
+        return Err(Error::DataLengthOutOfBound);
+    }
+    env.with_querier_from_context(|querier| {
+        let span_size = querier.get_span_size();
+
+        if y_len > span_size || pi_len > span_size || alpha_len > span_size {
+            return Err(Error::SpanTooSmallError);
+        }
+        // consume gas relatively to the function running time (~7.5ms)
+        env.decrease_gas_left(ECVRF_VERIFY_GAS)?;
+        let y: Vec<u8> = read_memory(env, y_ptr, y_len)?;
+        let pi: Vec<u8> = read_memory(env, pi_ptr, pi_len)?;
+        let alpha: Vec<u8> = read_memory(env, alpha_ptr, alpha_len)?;
+
+        let result = ecvrf::ecvrf_verify(&y, &pi, &alpha);
+        Ok(result.map_or_else(
+            |err| match err {
+                CryptoError::InvalidPointOnCurve { .. }
+                | CryptoError::InvalidPubkeyFormat { .. }
+                | CryptoError::InvalidProofFormat { .. }
+                | CryptoError::InvalidHashFormat { .. }
+                | CryptoError::GenericErr { .. } => err.code(),
+            },
+            |valid| if valid { 0 } else { 1 },
+        ))
+    })
+}
+
+pub fn create_import_object<Q>(store: &Store, owasm_env: Environment<Q>) -> ImportObject
+where
+    Q: Querier + 'static,
 {
     imports! {
         "env" => {
-            "gas" => Function::new_native_with_env(&store, owasm_env.clone(), do_gas),
-            "get_span_size" => Function::new_native_with_env(&store, owasm_env.clone(), do_get_span_size),
-            "read_calldata" => Function::new_native_with_env(&store, owasm_env.clone(), do_read_calldata),
-            "set_return_data" => Function::new_native_with_env(&store, owasm_env.clone(), do_set_return_data),
-            "get_ask_count" => Function::new_native_with_env(&store, owasm_env.clone(), do_get_ask_count),
-            "get_min_count" => Function::new_native_with_env(&store, owasm_env.clone(), do_get_min_count),
-            "get_prepare_time" => Function::new_native_with_env(&store, owasm_env.clone(), do_get_prepare_time),
-            "get_execute_time" => Function::new_native_with_env(&store, owasm_env.clone(), do_get_execute_time),
-            "get_ans_count" => Function::new_native_with_env(&store, owasm_env.clone(), do_get_ans_count),
-            "ask_external_data" => Function::new_native_with_env(&store, owasm_env.clone(), do_ask_external_data),
-            "get_external_data_status" => Function::new_native_with_env(&store, owasm_env.clone(), do_get_external_data_status),
-            "read_external_data" => Function::new_native_with_env(&store, owasm_env.clone(), do_read_external_data),
-            // "ecvrf_verify" => Function::new_native_with_env(&store, owasm_env.clone(), do_ecvrf_verify),
+            "gas" => Function::new_native_with_env(store, owasm_env.clone(), do_gas),
+            "get_span_size" => Function::new_native_with_env(store, owasm_env.clone(), do_get_span_size),
+            "read_calldata" => Function::new_native_with_env(store, owasm_env.clone(), do_read_calldata),
+            "set_return_data" => Function::new_native_with_env(store, owasm_env.clone(), do_set_return_data),
+            "get_ask_count" => Function::new_native_with_env(store, owasm_env.clone(), do_get_ask_count),
+            "get_min_count" => Function::new_native_with_env(store, owasm_env.clone(), do_get_min_count),
+            "get_prepare_time" => Function::new_native_with_env(store, owasm_env.clone(), do_get_prepare_time),
+            "get_execute_time" => Function::new_native_with_env(store, owasm_env.clone(), do_get_execute_time),
+            "get_ans_count" => Function::new_native_with_env(store, owasm_env.clone(), do_get_ans_count),
+            "ask_external_data" => Function::new_native_with_env(store, owasm_env.clone(), do_ask_external_data),
+            "get_external_data_status" => Function::new_native_with_env(store, owasm_env.clone(), do_get_external_data_status),
+            "read_external_data" => Function::new_native_with_env(store, owasm_env.clone(), do_read_external_data),
+            "ecvrf_verify" => Function::new_native_with_env(store, owasm_env.clone(), do_ecvrf_verify),
         },
     }
 }
@@ -225,9 +310,9 @@ mod test {
     use wasmer::Instance;
     use wasmer::ValType::{I32, I64};
 
-    pub struct MockEnv {}
+    pub struct MockQuerier {}
 
-    impl Env for MockEnv {
+    impl Querier for MockQuerier {
         fn get_span_size(&self) -> i64 {
             300
         }
@@ -280,7 +365,7 @@ mod test {
         wasm
     }
 
-    fn create_owasm_env() -> (Environment<MockEnv>, Instance) {
+    fn create_owasm_env() -> (Environment<MockQuerier>, Instance) {
         let wasm = wat2wasm(
             r#"(module
             (func
@@ -295,22 +380,42 @@ mod test {
         );
         let code = compile(&wasm).unwrap();
 
-        let env = MockEnv {};
-        let owasm_env = Environment::new(env);
+        let querier = MockQuerier {};
+        let owasm_env = Environment::new(querier);
         let store = make_store();
         let import_object = create_import_object(&store, owasm_env.clone());
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let instance = cache.get_instance(&code, &store, &import_object).unwrap();
+        let (instance, _) = cache.get_instance(&code, &store, &import_object).unwrap();
 
         return (owasm_env, instance);
     }
 
     #[test]
+    fn test_wrapper_fn() {
+        let querier = MockQuerier {};
+        let owasm_env = Environment::new(querier);
+        assert_eq!(Ok(()), require_mem_range(2, 1));
+        assert_eq!(Err(Error::MemoryOutOfBoundError), require_mem_range(1, 2));
+        assert_eq!(Ok(()), require_mem_range(usize::MAX, usize::MAX));
+        assert_eq!(Ok(usize::MAX), safe_convert(usize::MAX as u64));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_convert::<_, usize>(-1));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_convert::<_, usize>(i64::MIN));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_convert::<_, i64>(usize::MAX));
+        assert_eq!(Ok(10), safe_add(4, 6));
+        assert_eq!(Ok(i64::MAX as usize + 1), safe_add(i64::MAX, 1));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_add(-1, 6));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_add(5, -10));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_add(usize::MAX as i64, 1));
+        assert_eq!(Err(Error::MemoryOutOfBoundError), read_memory(&owasm_env, -1, 1));
+        assert_eq!(Err(Error::MemoryOutOfBoundError), write_memory(&owasm_env, -1, vec! {}))
+    }
+
+    #[test]
     fn test_import_object_function_type() {
-        let env = MockEnv {};
-        let owasm_env = Environment::new(env);
+        let querier = MockQuerier {};
+        let owasm_env = Environment::new(querier);
         let store = make_store();
-        assert_eq!(create_import_object(&store, owasm_env.clone()).externs_vec().len(), 12);
+        assert_eq!(create_import_object(&store, owasm_env.clone()).externs_vec().len(), 13);
 
         assert_eq!(create_import_object(&store, owasm_env.clone()).externs_vec()[0].1, "gas");
         assert_eq!(
@@ -420,134 +525,366 @@ mod test {
 
     #[test]
     fn test_do_gas() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        do_gas(&owasm_env, 0).unwrap();
-        assert_eq!(gas_limit - 12500000, owasm_env.get_gas_left());
+        assert_eq!(Ok(()), do_gas(&owasm_env, 0));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Ok(()), do_gas(&owasm_env, u32::MAX));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_span_size() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(300, do_get_span_size(&owasm_env));
+        assert_eq!(Ok(300), do_get_span_size(&owasm_env));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_read_calldata() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(1, do_read_calldata(&owasm_env, 0).unwrap());
+        assert_eq!(Ok(1), do_read_calldata(&owasm_env, 0));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, -1));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, 6553600));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, i64::MAX));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_calldata(&owasm_env, i64::MIN));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_set_return_data() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(Ok(()), do_set_return_data(&owasm_env, 0, 0))
+        assert_eq!(Ok(()), do_set_return_data(&owasm_env, 0, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_set_return_data(&owasm_env, -1, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_set_return_data(&owasm_env, i64::MAX, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_set_return_data(&owasm_env, i64::MIN, 0));
+        gas_limit =
+            gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0 as i64));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::DataLengthOutOfBound), do_set_return_data(&owasm_env, 0, -1));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::SpanTooSmallError), do_set_return_data(&owasm_env, 0, i64::MAX));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::DataLengthOutOfBound), do_set_return_data(&owasm_env, 0, i64::MIN));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_ask_count() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(10, do_get_ask_count(&owasm_env));
+        assert_eq!(Ok(10), do_get_ask_count(&owasm_env));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_min_count() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(8, do_get_min_count(&owasm_env));
+        assert_eq!(Ok(8), do_get_min_count(&owasm_env));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_prepare_time() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(100_000, do_get_prepare_time(&owasm_env));
+        assert_eq!(Ok(100_000), do_get_prepare_time(&owasm_env));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_execute_time() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(100_000, do_get_execute_time(&owasm_env).unwrap());
+        assert_eq!(Ok(100_000), do_get_execute_time(&owasm_env));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_ans_count() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(8, do_get_ans_count(&owasm_env).unwrap());
+        assert_eq!(Ok(8), do_get_ans_count(&owasm_env));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_ask_external_data() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(Ok(()), do_ask_external_data(&owasm_env, 0, 0, 0, 0))
+        assert_eq!(Ok(()), do_ask_external_data(&owasm_env, 0, 0, 0, 0));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::MemoryOutOfBoundError),
+            do_ask_external_data(&owasm_env, 0, 0, -1, 0)
+        );
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::MemoryOutOfBoundError),
+            do_ask_external_data(&owasm_env, 0, 0, i64::MAX, 0)
+        );
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::MemoryOutOfBoundError),
+            do_ask_external_data(&owasm_env, 0, 0, i64::MIN, 0)
+        );
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(0));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::DataLengthOutOfBound), do_ask_external_data(&owasm_env, 0, 0, 0, -1));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::SpanTooSmallError),
+            do_ask_external_data(&owasm_env, 0, 0, 0, i64::MAX)
+        );
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::DataLengthOutOfBound),
+            do_ask_external_data(&owasm_env, 0, 0, 0, i64::MIN)
+        );
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::MemoryOutOfBoundError),
+            do_ask_external_data(&owasm_env, 0, 0, i64::MAX, 5)
+        );
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS.saturating_add(calculate_read_memory_gas(5));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_get_external_data_status() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(1, do_get_external_data_status(&owasm_env, 0, 0).unwrap());
+        assert_eq!(Ok(1), do_get_external_data_status(&owasm_env, 0, 0));
+        gas_limit = gas_limit - IMPORTED_FUNCTION_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 
     #[test]
     fn test_do_read_external_data() {
-        let gas_limit = 2_500_000_000_000;
+        let mut gas_limit = 2_500_000_000_000;
         let (owasm_env, instance) = create_owasm_env();
         let instance_ptr = NonNull::from(&instance);
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(1, do_read_external_data(&owasm_env, 0, 0, 0).unwrap());
+        assert_eq!(Ok(1), do_read_external_data(&owasm_env, 0, 0, 0));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(Err(Error::MemoryOutOfBoundError), do_read_external_data(&owasm_env, 0, 0, -1));
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::MemoryOutOfBoundError),
+            do_read_external_data(&owasm_env, 0, 0, i64::MAX)
+        );
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        assert_eq!(
+            Err(Error::MemoryOutOfBoundError),
+            do_read_external_data(&owasm_env, 0, 0, i64::MIN)
+        );
+        gas_limit = gas_limit
+            - IMPORTED_FUNCTION_GAS.saturating_add(calculate_write_memory_gas(vec![1].len()));
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+    }
+
+    #[test]
+    fn test_do_ecvrf_verify() {
+        let mut gas_limit = 100_000_000_000_000;
+        let (owasm_env, instance) = create_owasm_env();
+        let instance_ptr = NonNull::from(&instance);
+        owasm_env.set_wasmer_instance(Some(instance_ptr));
+        owasm_env.set_gas_left(gas_limit);
+
+        assert_eq!(Ok(5), do_ecvrf_verify(&owasm_env, 0, 0, 0, 0, 0, 0));
+        gas_limit = gas_limit - ECVRF_VERIFY_GAS;
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        for ptr in [-1, i64::MAX, i64::MIN] {
+            assert_eq!(
+                Err(Error::MemoryOutOfBoundError),
+                do_ecvrf_verify(&owasm_env, ptr, 0, 0, 0, 0, 0),
+                "testing with ptr: {}",
+                ptr
+            );
+            gas_limit = gas_limit - ECVRF_VERIFY_GAS;
+            assert_eq!(gas_limit, owasm_env.get_gas_left());
+        }
+
+        for ptr in [-1, i64::MAX, i64::MIN] {
+            assert_eq!(
+                Err(Error::MemoryOutOfBoundError),
+                do_ecvrf_verify(&owasm_env, 0, 0, ptr, 0, 0, 0),
+                "testing with ptr: {}",
+                ptr
+            );
+            gas_limit = gas_limit - ECVRF_VERIFY_GAS;
+            assert_eq!(gas_limit, owasm_env.get_gas_left());
+        }
+
+        for ptr in [-1, i64::MAX, i64::MIN] {
+            assert_eq!(
+                Err(Error::MemoryOutOfBoundError),
+                do_ecvrf_verify(&owasm_env, 0, 0, 0, 0, ptr, 0),
+                "testing with ptr: {}",
+                ptr
+            );
+            gas_limit = gas_limit - ECVRF_VERIFY_GAS;
+            assert_eq!(gas_limit, owasm_env.get_gas_left());
+        }
+
+        for len in [-1, i64::MIN] {
+            assert_eq!(
+                Err(Error::DataLengthOutOfBound),
+                do_ecvrf_verify(&owasm_env, 0, len, 0, 0, 0, 0),
+                "testing with ptr: {}",
+                len
+            );
+            assert_eq!(gas_limit, owasm_env.get_gas_left());
+        }
+
+        assert_eq!(
+            Err(Error::SpanTooSmallError),
+            do_ecvrf_verify(&owasm_env, 0, i64::MAX, 0, 0, 0, 0),
+        );
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        for len in [-1, i64::MIN] {
+            assert_eq!(
+                Err(Error::DataLengthOutOfBound),
+                do_ecvrf_verify(&owasm_env, 0, 0, 0, len, 0, 0),
+                "testing with ptr: {}",
+                len
+            );
+            assert_eq!(gas_limit, owasm_env.get_gas_left());
+        }
+
+        assert_eq!(
+            Err(Error::SpanTooSmallError),
+            do_ecvrf_verify(&owasm_env, 0, 0, 0, i64::MAX, 0, 0),
+        );
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
+
+        for len in [-1, i64::MIN] {
+            assert_eq!(
+                Err(Error::DataLengthOutOfBound),
+                do_ecvrf_verify(&owasm_env, 0, 0, 0, 0, 0, len),
+                "testing with ptr: {}",
+                len
+            );
+            assert_eq!(gas_limit, owasm_env.get_gas_left());
+        }
+
+        assert_eq!(
+            Err(Error::SpanTooSmallError),
+            do_ecvrf_verify(&owasm_env, 0, 0, 0, 0, 0, i64::MAX),
+        );
+        assert_eq!(gas_limit, owasm_env.get_gas_left());
     }
 }

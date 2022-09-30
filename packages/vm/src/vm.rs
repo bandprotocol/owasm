@@ -1,12 +1,12 @@
 use crate::error::Error;
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, BorrowMut};
 use std::ptr::NonNull;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use wasmer::{Instance, Memory, WasmerEnv};
 use wasmer_middlewares::metering::{get_remaining_points, set_remaining_points, MeteringPoints};
 
-pub trait Env {
+pub trait Querier {
     /// Returns the maximum span size value.
     fn get_span_size(&self) -> i64;
     /// Returns user calldata, or returns error from VM runner.
@@ -31,81 +31,54 @@ pub trait Env {
     fn get_external_data(&self, eid: i64, vid: i64) -> Result<Vec<u8>, Error>;
 }
 
-/// A `VMLogic` encapsulates the runtime logic of Owasm scripts.
-pub struct VMLogic<E>
-where
-    E: Env,
-{
-    pub env: E, // The execution environment.
-}
-
-impl<E> VMLogic<E>
-where
-    E: Env,
-{
-    /// Creates a new `VMLogic` instance.
-    pub fn new(env: E) -> Self {
-        Self { env: env }
-    }
-}
-
-pub struct ContextData {
+pub struct ContextData<Q: Querier> {
+    querier: Q,
     /// A non-owning link to the wasmer instance
     wasmer_instance: Option<NonNull<Instance>>,
 }
 
-impl ContextData {
-    pub fn new() -> Self {
-        ContextData { wasmer_instance: None }
+impl<Q: Querier> ContextData<Q> {
+    pub fn new(querier: Q) -> Self {
+        ContextData::<Q> { wasmer_instance: None, querier }
     }
 }
 
 #[derive(WasmerEnv)]
-pub struct Environment<E>
+pub struct Environment<Q>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    vm: Arc<Mutex<VMLogic<E>>>,
-    data: Arc<RwLock<ContextData>>,
+    data: Arc<RwLock<ContextData<Q>>>,
 }
 
-impl<E: Env + 'static> Clone for Environment<E> {
+impl<Q: Querier + 'static> Clone for Environment<Q> {
     fn clone(&self) -> Self {
-        Self { vm: Arc::clone(&self.vm), data: self.data.clone() }
+        Self { data: self.data.clone() }
     }
 }
-unsafe impl<E: Env> Send for Environment<E> {}
-unsafe impl<E: Env> Sync for Environment<E> {}
+unsafe impl<Q: Querier> Send for Environment<Q> {}
+unsafe impl<Q: Querier> Sync for Environment<Q> {}
 
-impl<E> Environment<E>
+impl<Q> Environment<Q>
 where
-    E: Env + 'static,
+    Q: Querier + 'static,
 {
-    pub fn new(e: E) -> Self {
-        Self {
-            vm: Arc::new(Mutex::new(VMLogic::<E>::new(e))),
-            data: Arc::new(RwLock::new(ContextData::new())),
-        }
+    pub fn new(q: Q) -> Self {
+        Self { data: Arc::new(RwLock::new(ContextData::new(q))) }
     }
 
-    pub fn with_vm<C, R>(&self, callback: C) -> R
+    pub fn with_querier_from_context<C, R>(&self, callback: C) -> R
     where
-        C: FnOnce(&VMLogic<E>) -> R,
+        C: FnOnce(&Q) -> R,
     {
-        callback(&self.vm.lock().unwrap())
-    }
-
-    pub fn with_mut_vm<C, R>(&self, callback: C) -> R
-    where
-        C: FnOnce(&mut VMLogic<E>) -> R,
-    {
-        callback(&mut self.vm.lock().unwrap())
+        self.with_context_data(|context_data| callback(&context_data.querier))
     }
 
     /// Creates a back reference from a contact to its partent instance
     pub fn set_wasmer_instance(&self, instance: Option<NonNull<Instance>>) {
-        let mut data = self.data.as_ref().write().unwrap();
-        data.wasmer_instance = instance;
+        self.with_context_data_mut(|data| {
+            data.wasmer_instance = instance;
+        })
     }
 
     pub fn with_wasmer_instance<C, R>(&self, callback: C) -> Result<R, Error>
@@ -123,10 +96,19 @@ where
 
     fn with_context_data<C, R>(&self, callback: C) -> R
     where
-        C: FnOnce(&ContextData) -> R,
+        C: FnOnce(&ContextData<Q>) -> R,
     {
         let guard = self.data.as_ref().read().unwrap();
         let context_data = guard.borrow();
+        callback(context_data)
+    }
+
+    fn with_context_data_mut<C, R>(&self, callback: C) -> R
+    where
+        C: FnOnce(&mut ContextData<Q>) -> R,
+    {
+        let mut guard = self.data.as_ref().write().unwrap();
+        let context_data = guard.borrow_mut();
         callback(context_data)
     }
 
@@ -153,14 +135,13 @@ where
         if gas > gas_left {
             Err(Error::OutOfGasError)
         } else {
-            self.set_gas_left(gas_left.saturating_sub(gas.into()));
+            self.set_gas_left(gas_left.saturating_sub(gas));
             Ok(())
         }
     }
 
     pub fn memory(&self) -> Result<Memory, Error> {
-        let data = self.data.as_ref().read().unwrap();
-        match data.wasmer_instance {
+        self.with_context_data(|data| match data.wasmer_instance {
             Some(instance_ptr) => {
                 let instance_ref = unsafe { instance_ptr.as_ref() };
                 let mut memories: Vec<Memory> =
@@ -172,7 +153,7 @@ where
                 }
             }
             _ => Err(Error::BadMemorySectionError),
-        }
+        })
     }
 }
 
@@ -193,9 +174,9 @@ mod test {
 
     use super::*;
 
-    pub struct MockEnv {}
+    pub struct MockQuerier {}
 
-    impl Env for MockEnv {
+    impl Querier for MockQuerier {
         fn get_span_size(&self) -> i64 {
             300
         }
@@ -249,15 +230,14 @@ mod test {
     }
 
     #[test]
-    fn test_env_vm() {
-        let env = Environment::new(MockEnv {});
-        assert_eq!(300, env.with_vm(|vm| vm.env.get_span_size()));
-        assert_eq!(300, env.with_mut_vm(|vm| vm.env.get_span_size()));
+    fn test_env_querier() {
+        let env = Environment::new(MockQuerier {});
+        assert_eq!(300, env.with_querier_from_context(|querier| querier.get_span_size()));
     }
 
     #[test]
     fn test_env_wasmer_instance() {
-        let env = Environment::new(MockEnv {});
+        let env = Environment::new(MockQuerier {});
         assert_eq!(
             Error::UninitializedContextData,
             env.with_wasmer_instance(|_| { Ok(()) }).unwrap_err()
@@ -273,14 +253,14 @@ mod test {
         let store = Store::new(&Universal::new(compiler).engine());
         let import_object = imports! {};
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let instance = cache.get_instance(&wasm, &store, &import_object).unwrap();
+        let (instance, _) = cache.get_instance(&wasm, &store, &import_object).unwrap();
         env.set_wasmer_instance(Some(NonNull::from(&instance)));
         assert_eq!(Ok(()), env.with_wasmer_instance(|_| { Ok(()) }));
     }
 
     #[test]
     fn test_env_gas() {
-        let env = Environment::new(MockEnv {});
+        let env = Environment::new(MockQuerier {});
         let wasm = wat2wasm(
             r#"(module
                 (func $execute (export "execute"))
@@ -290,7 +270,7 @@ mod test {
         let store = make_store();
         let import_object = imports! {};
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let instance = cache.get_instance(&wasm, &store, &import_object).unwrap();
+        let (instance, _) = cache.get_instance(&wasm, &store, &import_object).unwrap();
         env.set_wasmer_instance(Some(NonNull::from(&instance)));
 
         assert_eq!(0, env.get_gas_left());
