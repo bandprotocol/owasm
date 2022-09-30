@@ -4,7 +4,7 @@ use crate::vm::{Environment, Querier};
 use wasmer::{imports, Function, ImportObject, Store};
 
 use owasm_crypto::ecvrf;
-use owasm_crypto::errors::CryptoError;
+use owasm_crypto::error::CryptoError;
 
 const IMPORTED_FUNCTION_GAS: u64 = 750_000_000;
 const ECVRF_VERIFY_GAS: u64 = 7_500_000_000_000;

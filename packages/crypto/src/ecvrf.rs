@@ -1,4 +1,4 @@
-use crate::errors::{CryptoError, CryptoResult};
+use crate::error::{CryptoError, CryptoResult};
 use gmp::mpz::Mpz;
 use hex::decode;
 use sha2::{Digest, Sha512};
