@@ -4,6 +4,7 @@ use crate::vm::{Environment, Querier};
 use wasmer::{imports, Function, ImportObject, Store};
 
 use owasm_crypto::ecvrf;
+use owasm_crypto::errors::CryptoError;
 
 const IMPORTED_FUNCTION_GAS: u64 = 750_000_000;
 const ECVRF_VERIFY_GAS: u64 = 7_500_000_000_000;
@@ -247,7 +248,18 @@ where
         let y: Vec<u8> = read_memory(env, y_ptr, y_len)?;
         let pi: Vec<u8> = read_memory(env, pi_ptr, pi_len)?;
         let alpha: Vec<u8> = read_memory(env, alpha_ptr, alpha_len)?;
-        Ok(safe_convert(ecvrf::ecvrf_verify(&y, &pi, &alpha))?)
+
+        let result = ecvrf::ecvrf_verify(&y, &pi, &alpha);
+        Ok(result.map_or_else(
+            |err| match err {
+                CryptoError::InvalidPointOnCurve { .. }
+                | CryptoError::InvalidPubkeyFormat { .. }
+                | CryptoError::InvalidProofFormat { .. }
+                | CryptoError::InvalidHashFormat { .. }
+                | CryptoError::GenericErr { .. } => err.code(),
+            },
+            |valid| if valid { 0 } else { 1 },
+        ))
     })
 }
 
@@ -772,7 +784,7 @@ mod test {
         owasm_env.set_wasmer_instance(Some(instance_ptr));
         owasm_env.set_gas_left(gas_limit);
 
-        assert_eq!(Ok(0), do_ecvrf_verify(&owasm_env, 0, 0, 0, 0, 0, 0));
+        assert_eq!(Ok(5), do_ecvrf_verify(&owasm_env, 0, 0, 0, 0, 0, 0));
         gas_limit = gas_limit - ECVRF_VERIFY_GAS;
         assert_eq!(gas_limit, owasm_env.get_gas_left());
 
