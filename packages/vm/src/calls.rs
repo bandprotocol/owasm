@@ -37,7 +37,7 @@ where
 
     function.call().map_err(|runtime_err| {
         if let Ok(err) = runtime_err.downcast::<Error>() {
-            return err.clone();
+            return err;
         }
 
         match get_remaining_points(&instance) {

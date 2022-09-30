@@ -6,7 +6,7 @@ pub fn fcmp<T>(lhs: &T, rhs: &T) -> Ordering
 where
     T: Float,
 {
-    match lhs.partial_cmp(&rhs) {
+    match lhs.partial_cmp(rhs) {
         Some(ordering) => ordering,
         None => {
             if lhs.is_nan() {

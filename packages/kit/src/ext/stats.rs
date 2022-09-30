@@ -25,7 +25,7 @@ where
     T: Num,
     F: FnMut(&T, &T) -> Ordering,
 {
-    if data.len() == 0 {
+    if data.is_empty() {
         return None;
     }
     data.sort_by(compare);
@@ -60,9 +60,9 @@ where
     // https://en.wikipedia.org/wiki/Boyer%E2%80%93Moore_majority_vote_algorithm
     for idx in 1..len {
         if data[candidate] == data[idx] {
-            count = count + 1;
+            count += 1;
         } else {
-            count = count - 1;
+            count -= 1;
         }
         if count == 0 {
             candidate = idx;
@@ -73,7 +73,7 @@ where
     count = 0;
     for idx in 0..len {
         if data[candidate] == data[idx] {
-            count = count + 1;
+            count += 1;
         }
     }
 

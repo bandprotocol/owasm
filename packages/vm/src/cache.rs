@@ -25,7 +25,7 @@ impl InMemoryCache {
 
     /// Looks up a module in the cache and creates a new module
     pub fn load(&mut self, checksum: &Checksum) -> Option<Module> {
-        self.modules.get(checksum).map(|m| m.clone())
+        self.modules.get(checksum).cloned()
     }
 }
 
