@@ -373,11 +373,22 @@ mod test {
 
     #[test]
     fn test_wrapper_fn() {
+        let querier = MockQuerier {};
+        let owasm_env = Environment::new(querier);
         assert_eq!(Ok(()), require_mem_range(2, 1));
         assert_eq!(Err(Error::MemoryOutOfBoundError), require_mem_range(1, 2));
         assert_eq!(Ok(()), require_mem_range(usize::MAX, usize::MAX));
         assert_eq!(Ok(usize::MAX), safe_convert(usize::MAX as u64));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_convert::<_, usize>(-1));
         assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_convert::<_, usize>(i64::MIN));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_convert::<_, i64>(usize::MAX));
+        assert_eq!(Ok(10), safe_add(4, 6));
+        assert_eq!(Ok(i64::MAX as usize + 1), safe_add(i64::MAX, 1));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_add(-1, 6));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_add(5, -10));
+        assert_eq!(Err(Error::ConvertTypeOutOfBound), safe_add(usize::MAX as i64, 1));
+        assert_eq!(Err(Error::MemoryOutOfBoundError), read_memory(&owasm_env, -1, 1));
+        assert_eq!(Err(Error::MemoryOutOfBoundError), write_memory(&owasm_env, -1, vec! {}))
     }
 
     #[test]

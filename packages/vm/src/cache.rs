@@ -116,7 +116,7 @@ mod test {
     }
 
     #[test]
-    fn test_catch() {
+    fn test_cache_catch() {
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let wasm = wat2wasm(
             r#"(module
@@ -142,6 +142,12 @@ mod test {
         let (_, is_hit) = get_instance_without_err(&mut cache, &wasm2);
         assert_eq!(false, is_hit);
 
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm);
+        assert_eq!(true, is_hit);
+
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm2);
+        assert_eq!(true, is_hit);
+
         let ser1 = match instance1.module().serialize() {
             Ok(r) => r,
             Err(_) => panic!("Fail to serialize module"),
@@ -156,7 +162,7 @@ mod test {
     }
 
     #[test]
-    fn test_lru_catch() {
+    fn test_cache_size() {
         let mut cache = Cache::new(CacheOptions { cache_size: 2 });
         let wasm1 = wat2wasm(
             r#"(module
@@ -208,6 +214,14 @@ mod test {
 
         // miss [2 1] => [3 2]
         let (_, is_hit) = get_instance_without_err(&mut cache, &wasm3);
+        assert_eq!(false, is_hit);
+
+        cache = Cache::new(CacheOptions { cache_size: 0 });
+
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm1);
+        assert_eq!(false, is_hit);
+
+        let (_, is_hit) = get_instance_without_err(&mut cache, &wasm1);
         assert_eq!(false, is_hit);
     }
 }

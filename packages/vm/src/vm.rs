@@ -231,7 +231,6 @@ mod test {
 
     #[test]
     fn test_env_querier() {
-        println!("{}", Error::OutOfGasError);
         let env = Environment::new(MockQuerier {});
         assert_eq!(300, env.with_querier_from_context(|querier| querier.get_span_size()));
     }

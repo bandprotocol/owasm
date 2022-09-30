@@ -211,7 +211,7 @@ mod test {
         let code = compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
         let querier = MockQuerier {};
-        let out_of_gas_err = run(&mut cache, &code, 0, true, querier).unwrap_err();
+        let out_of_gas_err = run(&mut cache, &code, 10, true, querier).unwrap_err();
         assert_eq!(out_of_gas_err, Error::OutOfGasError);
     }
 }
