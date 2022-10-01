@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::wasm_backend::FilterImport;
 use wasmer::wasmparser::Operator;
 use wasmer::{CompilerConfig, Singlepass, Store, Universal};
 use wasmer_middlewares::Metering;
@@ -24,8 +25,13 @@ fn cost(operator: &Operator) -> u64 {
 
 pub fn make_store() -> Store {
     let mut compiler = Singlepass::new();
+
+    let filter_import = Arc::new(FilterImport::default());
+    compiler.push_middleware(filter_import);
+
     let metering = Arc::new(Metering::new(0, cost));
     compiler.push_middleware(metering);
+
     let engine = Universal::new(compiler).engine();
     Store::new(&engine)
 }

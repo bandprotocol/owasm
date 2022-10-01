@@ -6,6 +6,7 @@ pub mod error;
 mod imports;
 mod store;
 pub mod vm;
+mod wasm_backend;
 
 pub use calls::run;
 pub use compile::compile;
