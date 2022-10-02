@@ -13,12 +13,12 @@ use wasmer_types::ModuleInfo;
 pub struct FilterImport {
     // the latter is number of parameters of the import
     omitted_imports: HashMap<String, u32>,
-    import_indexes: Mutex<HashMap<u32, u32>>,
+    import_indexes: Mutex<Option<HashMap<u32, u32>>>,
 }
 
 impl FilterImport {
     fn new(omitted_imports: HashMap<String, u32>) -> Self {
-        Self { omitted_imports, import_indexes: Mutex::new(HashMap::new()) }
+        Self { omitted_imports, import_indexes: Mutex::new(None) }
     }
 }
 
@@ -32,18 +32,27 @@ impl ModuleMiddleware for FilterImport {
     /// Generates a `FunctionMiddleware` for a given function.
     fn generate_function_middleware(&self, _: LocalFunctionIndex) -> Box<dyn FunctionMiddleware> {
         Box::new(FunctionFilterImport {
-            import_indexes: self.import_indexes.lock().unwrap().clone(),
+            import_indexes: self.import_indexes.lock().unwrap().clone().unwrap(),
         })
     }
 
     /// Transforms a `ModuleInfo` struct in-place. This is called before application on functions begins.
     fn transform_module_info(&self, module_info: &mut ModuleInfo) {
         let mut import_indexes = self.import_indexes.lock().unwrap();
+
+        if import_indexes.is_some() {
+            panic!("FilterImport::transform_module_info: Attempting to use a `FilterImport` middleware from multiple modules.");
+        }
+
+        let mut map = HashMap::new();
+
         module_info.imports.iter().for_each(|(key, _value)| {
             if let Some(params) = self.omitted_imports.get(&format!("{}.{}", key.0, key.1)) {
-                import_indexes.insert(key.2, *params);
+                map.insert(key.2, *params);
             }
         });
+
+        *import_indexes = Some(map);
     }
 }
 
