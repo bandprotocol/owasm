@@ -448,6 +448,14 @@ mod tests {
     }
 
     #[test]
+    fn ecvrf_decode_proof_fail_s_out_of_range_test() {
+        assert!(ecvrf_decode_proof(
+            &decode("a80954531c41b09280438b805fb8264e20791a0fd011a18f6def7b9cc48315c9f4b41e93d8f4140c1ffc917c67640a45c66e7ce47d754462ab40aa0cce09c11b0234c0a8ba265e5fd27ed1d67bc4a7ff")
+                .unwrap()
+        ).is_err());
+    }
+
+    #[test]
     fn ecvrf_hash_points_test() {
         assert_eq!(
             ecvrf_hash_points(
