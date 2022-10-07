@@ -139,6 +139,10 @@ fn ecvrf_decode_proof(pi: &[u8]) -> CryptoResult<((Mpz, Mpz), Mpz, Mpz)> {
     let c = parse_rev_bytes(&pi[32..48]);
     let s = parse_rev_bytes(&pi[48..]);
 
+    if s >= *ORDER {
+        return Err(CryptoError::generic_err("s is out of range"));
+    }
+
     Ok((gamma, c, s))
 }
 
@@ -441,6 +445,14 @@ mod tests {
                 .unwrap()
             )
         );
+    }
+
+    #[test]
+    fn ecvrf_decode_proof_fail_s_out_of_range_test() {
+        assert!(ecvrf_decode_proof(
+            &decode("a80954531c41b09280438b805fb8264e20791a0fd011a18f6def7b9cc48315c9f4b41e93d8f4140c1ffc917c67640a45c66e7ce47d754462ab40aa0cce09c11b0234c0a8ba265e5fd27ed1d67bc4a7ff")
+                .unwrap()
+        ).is_err());
     }
 
     #[test]
@@ -786,6 +798,16 @@ mod tests {
                     .unwrap(),
                 &decode("8057fc57942da97027ea37353d22c6e63c81961574424e1f60e406a0791d6a460700700bf2926d16872a7e8240898db4f239e0f68473503c61f74f19a27c182373ec99ab5c871b2305f5d7bd1c95da08").unwrap(),
                 &decode("34a11e19fd3650e9b7818fc33a1e0fc02c44557ac8")
+                    .unwrap(),
+            ).unwrap(),
+            true
+        );
+        assert_eq!(
+            ecvrf_verify(
+                &decode("0b6ebe53e0e8665f43a6836fedacf22fb0b19f1136e90bf0e1705c5a1cf06460")
+                    .unwrap(),
+                &decode("1948c53146fe557db8e0f599a6be574e5b5fb5e8311c9cc26b8bd4added68cc8857cd34925f0b26f9f69e4a03519552898c2998bc0dadff45c5965fb7cb67b9d498bce3ad3c29c60165703d4ce3efa01").unwrap(),
+                &decode("656366666538303130663636636165393131383865383661646235393532656530626334623538316261663235636535303566646231353363383139643437373a31363634383632393030")
                     .unwrap(),
             ).unwrap(),
             true
