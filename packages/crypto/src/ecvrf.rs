@@ -395,6 +395,11 @@ mod tests {
                     .unwrap()
             )
         );
+        assert_eq!(decode_point(&decode("").unwrap()), Err(CryptoError::invalid_hash_format()));
+        assert_eq!(
+            decode_point(&decode("11").unwrap()),
+            Err(CryptoError::invalid_point_on_curve())
+        );
     }
 
     #[test]
@@ -728,6 +733,11 @@ mod tests {
                     .unwrap(),
             )
         );
+
+        assert_eq!(
+            scalar_multiply(&(Mpz::zero(), Mpz::zero()), &Mpz::zero(),),
+            (Mpz::zero(), Mpz::one(),)
+        );
     }
 
     #[test]
@@ -811,6 +821,17 @@ mod tests {
                     .unwrap(),
             ).unwrap(),
             true
+        );
+
+        let zero_vec: Vec<u8> = vec![0; 200];
+
+        assert_eq!(
+            ecvrf_verify(&zero_vec[0..30], &zero_vec[0..1], &zero_vec[0..1]),
+            Err(CryptoError::invalid_pubkey_format())
+        );
+        assert_eq!(
+            ecvrf_verify(&zero_vec[0..32], &zero_vec[0..1], &zero_vec[0..1]),
+            Err(CryptoError::invalid_proof_format())
         );
     }
 }

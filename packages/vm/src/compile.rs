@@ -112,7 +112,7 @@ fn inject_stack_height(module: Module) -> Result<Module, Error> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     use assert_matches::assert_matches;

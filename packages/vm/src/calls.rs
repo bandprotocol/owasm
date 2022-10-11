@@ -53,7 +53,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use crate::cache::CacheOptions;
 
     use super::*;
@@ -159,7 +159,7 @@ mod test {
                     (i64.const 1)
                     (i64.const 1)
                     (i64.const 1048576)
-                    (i64.const 4)                  
+                    (i64.const 4)
                     call 0
 
                     (local.set $idx (i32.const 0))
@@ -172,7 +172,7 @@ mod test {
                 )
                 (func (;"execute": Resolves with result "beeb";))
                 (memory (export "memory") 17)
-                (data (i32.const 1048576) "beeb")              
+                (data (i32.const 1048576) "beeb")
                 (export "prepare" (func 1))
                 (export "execute" (func 2)))
             "#,
@@ -186,6 +186,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(not(tarpaulin))]
     fn test_out_of_gas() {
         let wasm = wat2wasm(
             r#"(module

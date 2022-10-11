@@ -5,7 +5,7 @@ use thiserror::Error;
 
 pub type CryptoResult<T> = core::result::Result<T, CryptoError>;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum CryptoError {
     #[error("Crypto error: {msg}")]
     GenericErr {
@@ -101,6 +101,15 @@ mod tests {
     }
 
     #[test]
+    fn invalid_point_on_curve_works() {
+        let error = CryptoError::invalid_point_on_curve();
+        match error {
+            CryptoError::InvalidPointOnCurve { .. } => {}
+            _ => panic!("wrong error type!"),
+        }
+    }
+
+    #[test]
     fn invalid_hash_format_works() {
         let error = CryptoError::invalid_hash_format();
         match error {
@@ -125,5 +134,14 @@ mod tests {
             CryptoError::InvalidPubkeyFormat { .. } => {}
             _ => panic!("wrong error type!"),
         }
+    }
+
+    #[test]
+    fn code_works() {
+        assert_eq!(CryptoError::invalid_point_on_curve().code(), 2);
+        assert_eq!(CryptoError::invalid_hash_format().code(), 3);
+        assert_eq!(CryptoError::invalid_proof_format().code(), 4);
+        assert_eq!(CryptoError::invalid_pubkey_format().code(), 5);
+        assert_eq!(CryptoError::generic_err("test").code(), 10);
     }
 }

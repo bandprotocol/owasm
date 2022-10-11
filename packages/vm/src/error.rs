@@ -43,3 +43,14 @@ impl Display for Error {
         write!(f, "{:?}", self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fmt_works() {
+        assert_eq!(format!("{}", Error::NoError), "NoError");
+        assert_eq!(format!("{}", Error::SpanTooSmallError), "SpanTooSmallError");
+    }
+}
