@@ -4,7 +4,6 @@ extern crate owasm_vm;
 use crate::owasm_vm::cache::*;
 use crate::owasm_vm::error::Error;
 use owasm_vm::vm::Querier;
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::process::Command;
 use tempfile::NamedTempFile;
@@ -82,110 +81,110 @@ fn generate_wat(imported_function: String) -> String {
 
 fuzz_target!(|data: [u64; 30]| {
     let mut imported_wat = vec![];
-    // imported_wat.push((
-    //     "get_span_size",
-    //     format!(
-    //         r#"(type (func (param) (result i64)))
-    //             (import "env" "get_span_size" (func (type 0)))
-    //             (func
-    //                 call 0
-    //                 drop
-    //             )"#
-    //     ),
-    // ));
-    // imported_wat.push((
-    //     "read_calldata",
-    //     format!(
-    //         r#"(type (func (param i64) (result i64)))
-    //             (import "env" "read_calldata" (func (type 0)))
-    //             (func
-    //                 (i64.const {})
-    //                 call 0
-    //                 drop
-    //             )"#,
-    //         data[29],
-    //     ),
-    // ));
-    // imported_wat.push((
-    //     "set_return_data",
-    //     format!(
-    //         r#"(type (func (param i64 i64) (result)))
-    //             (import "env" "set_return_data" (func (type 0)))
-    //             (func
-    //                 (i64.const {})
-    //                 (i64.const {})
-    //                 call 0
-    //             )"#,
-    //         data[28], data[29],
-    //     ),
-    // ));
-    // imported_wat.push((
-    //     "get_ask_count",
-    //     format!(
-    //         r#"(type (func (param) (result i64)))
-    //             (import "env" "get_ask_count" (func (type 0)))
-    //             (func
-    //                 call 0
-    //                 drop
-    //             )"#,
-    //     ),
-    // ));
-    // imported_wat.push((
-    //     "get_min_count",
-    //     format!(
-    //         r#"(type (func (param) (result i64)))
-    //             (import "env" "get_min_count" (func (type 0)))
-    //             (func
-    //                 call 0
-    //                 drop
-    //             )"#,
-    //     ),
-    // ));
-    // imported_wat.push((
-    //     "get_prepare_time",
-    //     format!(
-    //         r#"(type (func (param) (result i64)))
-    //             (import "env" "get_prepare_time" (func (type 0)))
-    //             (func
-    //                 call 0
-    //                 drop
-    //             )"#,
-    //     ),
-    // ));
-    // imported_wat.push((
-    //     "get_execute_time",
-    //     format!(
-    //         r#"(type (func (param) (result i64)))
-    //             (import "env" "get_execute_time" (func (type 0)))
-    //             (func
-    //                 call 0
-    //                 drop
-    //             )"#,
-    //     ),
-    // ));
-    // imported_wat.push((
-    //     "get_ans_count",
-    //     format!(
-    //         r#"(type (func (param) (result i64)))
-    //             (import "env" "get_ans_count" (func (type 0)))
-    //             (func
-    //                 call 0
-    //                 drop
-    //             )"#,
-    //     ),
-    // ));
+    imported_wat.push((
+        "get_span_size",
+        format!(
+            r#"(type (func (param) (result i64)))
+                (import "env" "get_span_size" (func (type 0)))
+                (func
+                    call 0
+                    drop
+                )"#
+        ),
+    ));
+    imported_wat.push((
+        "read_calldata",
+        format!(
+            r#"(type (func (param i64) (result i64)))
+                (import "env" "read_calldata" (func (type 0)))
+                (func
+                    (i64.mul (i64.const {}) (i64.const {}))
+                    call 0
+                    drop
+                )"#,
+            data[28], data[29],
+        ),
+    ));
+    imported_wat.push((
+        "set_return_data",
+        format!(
+            r#"(type (func (param i64 i64) (result)))
+                (import "env" "set_return_data" (func (type 0)))
+                (func
+                    (i64.mul (i64.const {}) (i64.const {}))
+                    (i64.div_s (i64.const {}) (i64.const 0))
+                    call 0
+                )"#,
+            data[26], data[27], data[28],
+        ),
+    ));
+    imported_wat.push((
+        "get_ask_count",
+        format!(
+            r#"(type (func (param) (result i64)))
+                (import "env" "get_ask_count" (func (type 0)))
+                (func
+                    call 0
+                    drop
+                )"#,
+        ),
+    ));
+    imported_wat.push((
+        "get_min_count",
+        format!(
+            r#"(type (func (param) (result i64)))
+                (import "env" "get_min_count" (func (type 0)))
+                (func
+                    call 0
+                    drop
+                )"#,
+        ),
+    ));
+    imported_wat.push((
+        "get_prepare_time",
+        format!(
+            r#"(type (func (param) (result i64)))
+                (import "env" "get_prepare_time" (func (type 0)))
+                (func
+                    call 0
+                    drop
+                )"#,
+        ),
+    ));
+    imported_wat.push((
+        "get_execute_time",
+        format!(
+            r#"(type (func (param) (result i64)))
+                (import "env" "get_execute_time" (func (type 0)))
+                (func
+                    call 0
+                    drop
+                )"#,
+        ),
+    ));
+    imported_wat.push((
+        "get_ans_count",
+        format!(
+            r#"(type (func (param) (result i64)))
+                (import "env" "get_ans_count" (func (type 0)))
+                (func
+                    call 0
+                    drop
+                )"#,
+        ),
+    ));
     imported_wat.push((
         "get_external_data_status",
         format!(
             r#"(type (func (param i64 i64) (result i64)))
                 (import "env" "get_external_data_status" (func (type 0)))
                 (func
-                    (i64.const {})
-                    (i64.const {})
+                    (i64.div_s (i64.const {}) (i64.const {}))
+                    (i64.mul (i64.const {}) (i64.const {}))
                     call 0
                     drop
                 )"#,
-            data[28], data[29]
+            data[26], data[27], data[28], data[29]
         ),
     ));
     imported_wat.push((
@@ -194,38 +193,57 @@ fuzz_target!(|data: [u64; 30]| {
             r#"(type (func (param i64 i64 i64 i64) (result)))
                 (import "env" "ask_external_data" (func (type 0)))
                 (func
-                    (i64.const {})
-                    (i64.const {})
-                    (i64.const {})
-                    (i64.const {})
+                    (i64.mul (i64.const {}) (i64.const {}))
+                    (i64.div_s (i64.const 0) (i64.const {}))
+                    (i64.div_s (i64.const {}) (i64.const 0))
+                    (i64.div_s (i64.const 0) (i64.const 0))
                     call 0
                 )"#,
             data[26], data[27], data[28], data[29]
         ),
     ));
-    // imported_wat.push((
-    //     "read_external_data",
-    //     format!(
-    //         r#"(type (func (param i64 i64 i64) (result i64)))
-    //             (import "env" "read_external_data" (func (type 0)))
-    //             (func
-    //                 (i64.const {})
-    //                 (i64.const {})
-    //                 (i64.const {})
-    //                 call 0
-    //                 drop
-    //             )"#,
-    //         data[27], data[28], data[29]
-    //     ),
-    // ));
-    for (func, wat) in &imported_wat {
-        println!("======================");
-        println!("{:?}", func);
+    imported_wat.push((
+        "read_external_data",
+        format!(
+            r#"(type (func (param i64 i64 i64) (result i64)))
+                (import "env" "read_external_data" (func (type 0)))
+                (func
+                    (i64.div_s (i64.const {}) (i64.const {}))
+                    (i64.mul (i64.const {}) (i64.const {}))
+                    (i64.sub (i64.const {}) (i64.const {}))
+                    call 0
+                    drop
+                )"#,
+            data[24], data[25], data[26], data[27], data[28], data[29]
+        ),
+    ));
+    imported_wat.push((
+        "ecvrf_verify",
+        format!(
+            r#"(type (func (param i64 i64 i64 i64 i64 i64) (result i32)))
+                (import "env" "ecvrf_verify" (func (type 0)))
+                (func
+                    (i64.mul (i64.const {}) (i64.const {}))
+                    (i64.add (i64.const {}) (i64.const {}))
+                    (i64.add (i64.const {}) (i64.const 0))
+                    (i64.sub (i64.const {}) (i64.const {}))
+                    (i64.sub (i64.const {}) (i64.const 0))
+                    (i64.sub (i64.const 0) (i64.const 0))
+                    call 0
+                    drop
+                )"#,
+            data[22], data[23], data[24], data[25], data[26], data[27], data[28], data[29]
+        ),
+    ));
+    for (_func, wat) in &imported_wat {
+        // println!("======================");
+        // println!("{:?}", func);
         let s = generate_wat(wat.clone());
+        // println!("{}", s);
         let wasm = wat2wasm(s);
         let code = owasm_vm::compile(&wasm).unwrap();
         let mut cache = Cache::new(CacheOptions { cache_size: 10000 });
-        let gas = owasm_vm::run(&mut cache, &code, u64::MAX, true, MockQuerier {});
-        println!("{:?}", gas);
+        let _gas = owasm_vm::run(&mut cache, &code, u64::MAX, true, MockQuerier {});
+        // println!("{:?}", gas);
     }
 });
