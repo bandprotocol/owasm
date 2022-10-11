@@ -1,0 +1,44 @@
+[package]
+name = "owasm-vm-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tempfile = "3.1.0"
+
+[dependencies.owasm-vm]
+path = ".."
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_target_1"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "../../src/compile2"
+path = "fuzz_targets/../../src/compile2.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "newtry"
+path = "fuzz_targets/newtry.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_imported_wat"
+path = "fuzz_targets/fuzz_imported_wat.rs"
+test = false
+doc = false
