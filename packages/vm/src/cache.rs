@@ -80,7 +80,7 @@ impl Cache {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::process::Command;

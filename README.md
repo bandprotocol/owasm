@@ -6,3 +6,10 @@ The standard libraries for building BandChain oracle scripts. Code in this packa
 - `kit` - standard libraries for BandChain oracle scripts
     - `ext` - a library is helper package for writing the oracle scripts 
     - `oei` - a library containing functions for querying data from BandChain
+
+## Coverage test
+- Install tarpaulin by this command
+    - `cargo install cargo-tarpaulin`
+- Get coverage test results
+    - `owasm-crypto` - cargo tarpaulin --out Html --output-dir reports/crypto --packages owasm-crypto
+    - `owasm-vm` - cargo tarpaulin --out Html --output-dir reports/vm --packages owasm-vm
