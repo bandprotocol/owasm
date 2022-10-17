@@ -6,7 +6,7 @@ license = "Apache-2.0"
 name = "owasm-crypto"
 readme = "README.md"
 repository = "https://github.com/bandprotocol/owasm/tree/master/packages/crypto"
-version = "0.2.1"
+version = "0.2.2"
 
 [features]
 default = []
