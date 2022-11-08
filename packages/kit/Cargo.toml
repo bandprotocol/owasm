@@ -9,4 +9,4 @@ repository = "https://github.com/bandprotocol/owasm/tree/master/packages/kit"
 version = "0.2.2"
 
 [dependencies]
-num = "0.2.1"
+num = "0.4.0"
