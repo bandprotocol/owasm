@@ -1,5 +1,6 @@
 //! # Owasm Standard Library
 use crate::oei;
+
 pub mod cmp;
 pub mod stats;
 
@@ -27,11 +28,19 @@ where
 }
 
 /// Returns the median value of the given external ID, ignoring unsuccessful reports.
-pub fn load_median<T>(eid: i64) -> Option<T>
+pub fn load_median_integer<T>(eid: i64) -> Option<T>
 where
-    T: std::str::FromStr + std::cmp::Ord + num::Num,
+    T: std::str::FromStr + std::cmp::Ord + num::Num + num::NumCast,
 {
-    stats::median(load_input(eid).collect())
+    stats::median_integer(load_input(eid).collect())
+}
+
+/// Returns the median value of the given external ID, ignoring unsuccessful reports.
+pub fn load_median_float<T>(eid: i64) -> Option<T>
+where
+    T: std::str::FromStr + num::Float + num::NumCast,
+{
+    stats::median_float(load_input(eid).collect())
 }
 
 /// Returns the majority value of the given external ID, ignoring unsuccessful reports.

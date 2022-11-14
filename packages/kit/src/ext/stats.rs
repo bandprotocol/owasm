@@ -1,5 +1,8 @@
 use core::cmp::{Ord, Ordering, PartialEq};
-use num::Num;
+
+use num::{Float, Num, NumCast};
+
+use crate::ext::cmp;
 
 /// Returns the average value of the given data set, or None if data is empty.
 pub fn average<T>(data: Vec<T>) -> Option<T>
@@ -22,29 +25,38 @@ where
 /// Returns the median value using the given compare function, or None if data is empty.
 pub fn median_by<T, F>(mut data: Vec<T>, compare: F) -> Option<T>
 where
-    T: Num,
+    T: Num + NumCast,
     F: FnMut(&T, &T) -> Ordering,
 {
     if data.is_empty() {
         return None;
     }
+
     data.sort_by(compare);
     let mid = data.len() / 2;
     if data.len() % 2 == 0 {
         let rhs = data.swap_remove(mid);
         let lhs = data.swap_remove(mid - 1);
-        Some((lhs + rhs) / (T::one() + T::one()))
+        Some((lhs + rhs) / NumCast::from(2).unwrap())
     } else {
         Some(data.swap_remove(mid))
     }
 }
 
 /// Returns the median value of the given data set, or None if data is empty.
-pub fn median<T>(data: Vec<T>) -> Option<T>
+pub fn median_integer<T>(data: Vec<T>) -> Option<T>
 where
-    T: Ord + Num,
+    T: Ord + Num + NumCast,
 {
     median_by(data, T::cmp)
+}
+
+/// Returns the median value of the given data set, or None if data is empty.
+pub fn median_float<T>(data: Vec<T>) -> Option<T>
+where
+    T: Float + NumCast,
+{
+    median_by(data, cmp::fcmp)
 }
 
 /// Returns the majority value of the given data set, or None if there is no majority.
@@ -87,7 +99,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ext::cmp;
 
     #[test]
     fn test_average_empty() {
@@ -122,51 +133,51 @@ mod tests {
     #[test]
     fn test_median_odd_int() {
         let vals = vec![3, 2, 5, 7, 2, 9, 1];
-        assert_eq!(median(vals), Some(3));
+        assert_eq!(median_integer(vals), Some(3));
     }
 
     #[test]
     fn test_median_single_int() {
         let vals = vec![3];
-        assert_eq!(median(vals), Some(3));
+        assert_eq!(median_integer(vals), Some(3));
     }
 
     #[test]
     fn test_median_empty() {
         let vals: Vec<i64> = vec![];
-        assert_eq!(median(vals), None);
+        assert_eq!(median_integer(vals), None);
     }
 
     #[test]
     fn test_median_even_int() {
         let vals = vec![3, 2, 5, 7, 2, 10, 32, 1];
-        assert_eq!(median(vals), Some(4));
+        assert_eq!(median_integer(vals), Some(4));
         let vals = vec![13, 36, 33, 45];
-        assert_eq!(median(vals), Some(34));
+        assert_eq!(median_integer(vals), Some(34));
         let vals = vec![13, 15];
-        assert_eq!(median(vals), Some(14));
+        assert_eq!(median_integer(vals), Some(14));
     }
 
     #[test]
     fn test_median_odd_float() {
         let vals = vec![3.5, 2.7, 5.1, 7.4, 2.0, 9.1, 1.9];
-        assert_eq!(median_by(vals, cmp::fcmp), Some(3.5));
+        assert_eq!(median_float(vals), Some(3.5));
     }
 
     #[test]
     fn test_median_single_float() {
         let vals = vec![3.0];
-        assert_eq!(median_by(vals, cmp::fcmp), Some(3.0));
+        assert_eq!(median_float(vals), Some(3.0));
     }
 
     #[test]
     fn test_median_even_float() {
         let vals = vec![3.4, 2.0, 5.7, 7.1, 2.2, 10.1, 32.0, 1.8];
-        assert_eq!(median_by(vals, cmp::fcmp), Some(4.55));
+        assert_eq!(median_float(vals), Some(4.55));
         let vals = vec![13.0, 36.0, 45.0, 33.0];
-        assert_eq!(median_by(vals, cmp::fcmp), Some(34.5));
+        assert_eq!(median_float(vals), Some(34.5));
         let vals = vec![13.0, 36.2];
-        assert_eq!(median_by(vals, cmp::fcmp), Some(24.6));
+        assert_eq!(median_float(vals), Some(24.6));
     }
 
     #[test]
