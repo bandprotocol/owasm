@@ -31,7 +31,7 @@ where
     let function = instance
         .exports
         .get_function(entry)
-        .unwrap()
+        .map_err(|_| Error::BadEntrySignatureError)?
         .native::<(), ()>()
         .map_err(|_| Error::BadEntrySignatureError)?;
 
