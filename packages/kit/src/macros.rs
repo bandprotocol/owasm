@@ -21,3 +21,25 @@ macro_rules! execute_entry_point {
         }
     };
 }
+
+#[macro_export]
+macro_rules! prepare_abi_entry_point {
+    ($name:ident) => {
+        #[no_mangle]
+        pub fn prepare() {
+            $name(SolValue::abi_decode(&oei::get_calldata(), true).unwrap());
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! execute_abi_entry_point {
+    ($name:ident) => {
+        #[no_mangle]
+        pub fn execute() {
+            oei::save_return_data(
+                &$name(SolValue::abi_decode(&oei::get_calldata(), true).unwrap()).abi_encode(),
+            );
+        }
+    };
+}
